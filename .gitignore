@@ -3,3 +3,5 @@
 dist/**
 functions26-*
 functions26.*
+.git*
+setup.cfg
