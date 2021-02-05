@@ -182,7 +182,7 @@ class DataSIF(DataXXX):
 
     def set_background(self):
         self.infoSIF['background_counts_per_second'] = self.infoSIF['background_counts_per_cycle'] / \
-                                                       self.infoSIF['exposure_time_secs'] / self.infoSIF['cycles']
+                                                       self.infoSIF['exposure_time_secs']
 
         self.infoSIF['background_counts'] = self.infoSIF['background_counts_per_cycle'] * self.infoSIF['cycles']
 

@@ -85,7 +85,7 @@ class DataMultiSIF(DataMultiXXX):
         elif other_variables is None:
             other_variables = []
 
-        dictionary_keys = ['x_' + unit_x, 'PL']
+        dictionary_keys = [label, 'PL']
         for variable in other_variables:
             if variable in self.multi_file_info:
                 dictionary_keys += other_variables
@@ -99,7 +99,7 @@ class DataMultiSIF(DataMultiXXX):
 
         integrated_pl = {key: [] for key in dictionary_keys}
         for n, data_object in enumerate(sorted_data_object_list):
-            integrated_pl['x_' + unit_x].append(float(data_object.file_info[label]))
+            integrated_pl[label].append(float(data_object.file_info[label]))
             if range == 'entire':
                 y = data_object.integrate_counts(unit_y, subtract_bg)
             else:
