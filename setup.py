@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="functions26",
-    version="0.0.7.1",
+    version="0.0.9.0",
     author="Vasilis Niaouris",
     author_email="vasilisniaouris@gmail.com",
     description="Supporting functions for Fu lab 26 room",
@@ -14,6 +14,7 @@ setuptools.setup(
     url="https://github.com/vasilisniaouris/functions26",
     packages=setuptools.find_packages(),
     install_requires=['collections-extended',
+                      'lmfit',
                       'matplotlib',
                       'nidaqmx',
                       'numpy',
@@ -23,14 +24,17 @@ setuptools.setup(
                       'pydaqmx',
                       'pyserial',
                       'pyvisa',
+                      'pyqt5',
+                      'pyqtgraph',
                       'scipy',
                       'seaborn',
+                      'sif_reader @ https://github.com/fujiisoup/sif_reader/tarball/master#egg=package-1.0',
+                      'spinmob',
                       'windfreak'],
-    dependency_links=['https://github.com/fujiisoup/sif_reader/tarball/master#egg=package-1.0'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.7',
+    python_requires='>=3.8',
 )

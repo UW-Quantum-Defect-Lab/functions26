@@ -5,7 +5,6 @@
 import pyvisa
 import nidaqmx
 import serial as srl
-from windfreak import SynthHD  # this is a class
 import time
 import warnings
 import pandas as pd
@@ -49,6 +48,13 @@ class Instrument:
 
     def simple_read(self):
         return self.instrument.read()
+
+    def simple_query(self, write_command):
+        try:
+            self.instrument.write(write_command)
+            return self.instrument.read()
+        except AttributeError:
+            raise AttributeError(str(type(self).__name__) + ' does not support a write command.')
 
 
 class GPIBInstrument(Instrument):
@@ -120,7 +126,8 @@ class GPIBInstrument(Instrument):
                 read_command = self.read_command
             else:
                 read_command = self.read_command[0]
-                print(self.device_name + ': This device has more than one reading commands. I chose to read the first one.')
+                print(
+                    self.device_name + ': This device has more than one reading commands. I chose to read the first one.')
         self.instrument.write(read_command)
         time.sleep(self.time_delay)
         return self.instrument.read()
@@ -129,40 +136,46 @@ class GPIBInstrument(Instrument):
 class NIdaqInstrument(Instrument):
     available_channel_types = ['ai', 'ctr']
     available_channel_reading_types = {'ai': ['Voltage'], 'ctr': ['EdgeCount']}
+    available_channel_lengths = {'ai': 2, 'ctr': 3}
 
-    def __init__(self, device_name='', verbose=1, initialize_at_definition=True, channel_type=None, channel_number_list=None,
+    def __init__(self, device_name='', verbose=1, initialize_at_definition=True, channel_type=None,
+                 channel_number_list=None,
                  channel_reading_type=None, response_function_method=None, response_function_file=None,
                  response_function_poly_order=4):
         self.task = None
         self.channels = None
+        self.channel_name_length = None
 
         # getting channel type
         if channel_type is None:  # Assume channel name is in device name, i.e.: 'dev1/ai0' -> 'ai'
             self.channel_type = device_name.split('/')[-1][:2]
+            if self.channel_type == 'ct':
+                self.channel_type = 'ctr'
         else:
             self.channel_type = channel_type
 
         if self.channel_type not in self.available_channel_types:
             warnings.warn('Channel type \'' + self.channel_type + '\' is not yet supported. Visit '
-                          'https://nidaqmx-python.readthedocs.io/en/latest/channel_collection.html to find out how to '
+                                                                  'https://nidaqmx-python.readthedocs.io/en/latest/channel_collection.html to find out how to '
                                                                   'add your own.You can access the created task via:'
                                                                   '<instance_name>.task or <instance_name>.instrument')
 
         if channel_reading_type is None:
-            self.channel_reading_type = 'Voltage'  # defaulting to voltage supported by analog input channels
-            warnings.warn('Channel reading type set to default value \'Voltage\'')
+            self.channel_reading_type = self.available_channel_reading_types[self.channel_type][
+                0]  # defaulting to voltage supported by analog input channels
+            warnings.warn('Channel reading type set to default value \'' +
+                          self.available_channel_reading_types[self.channel_type][0] + '\'')
         else:
             self.channel_reading_type = channel_reading_type
 
         if self.channel_reading_type not in self.available_channel_reading_types[self.channel_type]:
             warnings.warn('Channel reading type \'' + self.channel_reading_type + '\' is not yet supported. Visit '
-                          'https://nidaqmx-python.readthedocs.io/en/latest/channel_collection.html to find out how to '
-                                                                  'add your own. You can access the created task via:'
-                                                                  '<instance_name>.task or <instance_name>.instrument')
-
+                                                                                  'https://nidaqmx-python.readthedocs.io/en/latest/channel_collection.html to find out how to '
+                                                                                  'add your own. You can access the created task via:'
+                                                                                  '<instance_name>.task or <instance_name>.instrument')
         # getting channel numbers
         if channel_number_list is None:  # Assume channel number is in device name, i.e.: 'dev1/ai02' -> '02' -> ['0', '2']
-            self.channel_number_list = [number for number in device_name.split('/')[-1][2:]]
+            self.channel_number_list = [number for number in device_name.split('/')[-1][len(self.channel_type):]]
         elif isinstance(channel_number_list, list):
             self.channel_number_list = [str(number) for number in channel_number_list]
         else:
@@ -170,7 +183,8 @@ class NIdaqInstrument(Instrument):
 
         #  getting device name to create a list of strings with all channel lists that will later be initialized
         if channel_type is None:
-            device_name_temp = '/'.join(device_name.split('/')[:-1])  # getting only the device name without the channels
+            device_name_temp = '/'.join(
+                device_name.split('/')[:-1])  # getting only the device name without the channels
         else:
             device_name_temp = device_name
         self.channel_list = [device_name_temp + '/' + self.channel_type + number for number in self.channel_number_list]
@@ -201,7 +215,7 @@ class NIdaqInstrument(Instrument):
                 if self.channel_reading_type == 'Voltage':
                     self.channels = [self.task.ai_channels.add_ai_voltage_chan(channel) for channel
                                      in self.channel_list]
-            elif self.channel_type == 'ci':
+            elif self.channel_type == 'ctr':
                 if self.channel_reading_type == 'EdgeCount':
                     self.channels = [self.task.ci_channels.add_ci_count_edges_chan(channel) for channel
                                      in self.channel_list]
@@ -268,7 +282,8 @@ class SerialInstrument(Instrument):
             warnings.warn(self.device_name + ': Serial Port Error. A parameter is out of range or access was denied.')
             return -1
         except srl.SerialException:
-            warnings.warn(self.device_name + ': Serial Port Error. Instrument can not be found or can not be configured.')
+            warnings.warn(
+                self.device_name + ': Serial Port Error. Instrument can not be found or can not be configured.')
             return -2
 
     def terminate_instrument(self):
@@ -302,35 +317,9 @@ class SerialInstrument(Instrument):
                 read_command = self.read_command
             else:
                 read_command = self.read_command[0]
-                print(self.device_name + ': This device was given more than one reading commands. Will only read the first one.')
+                print(
+                    self.device_name + ': This device was given more than one reading commands. Will only read the first one.')
         self.instrument.write(read_command)
         lines = self.instrument.readlines()
         return lines[-1]
 
-
-class WindfreakSythHDInstrument(Instrument):  # it is a serial instrument that has it's own class based on Serial
-
-    def __init__(self, device_name='', verbose=1, initialize_at_definition=True):
-        super().__init__(device_name, verbose, initialize_at_definition)
-
-    def initialize_instrument(self):
-
-        try:
-            self.instrument = SynthHD(self.device_name)
-            self.instrument.init()
-            if self.verbose > 1:
-                print(self.device_name + ': Instrument successfully initialized')
-            return self.instrument
-        except Exception as e:
-            warnings.warn(self.device_name + ': SynthHD Error. Check instrument name or if instrument is available')
-            return -1
-
-    def terminate_instrument(self):
-
-        try:
-            self.instrument.close()
-        except Exception as e:
-            warnings.warn(self.device_name + ': An error occured. Instrument was not terminated. Error: ' + str(e))
-
-    def get_instrument_reading_string(self):
-        raise RuntimeError('This read statement is too broad. Check windfreak SynthHD class for more info.')

@@ -15,10 +15,13 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import scipy.io as spio
 import warnings
+import scipy.optimize as spo
+import scipy.signal as sps
 
 
 def convert_to_string_to_float(number_string):
@@ -45,6 +48,29 @@ def convert_to_string_to_float(number_string):
     number *= sign
 
     return number
+
+def line(x, a, b):
+    return a*x+b
+def exponential(x, a, b, x0):
+    return a*np.exp(b*(x-x0))
+def guess_initial_parameters(x, y, function = 'linear'):
+    index_min = x.idxmin()
+    index_max = x.idxmax()
+    x0 = x.loc[index_min]
+    x1 = x.loc[index_max]
+    y0 = y.loc[index_min]
+    y1 = y.loc[index_max]
+    if function == 'linear':
+        slope = (y1-y0)/(x1-x0)
+        intersect = y1 - slope*x1
+        p0 = [slope, intersect]
+    elif function == 'exponential':
+        exponent = (np.log(y1) - np.log(y0))/(x1 - x0)
+        prefactor = y0
+        shift = x0
+        p0 = [prefactor, exponent, shift]
+
+    return p0
 
 
 class DataImage:
@@ -90,10 +116,34 @@ class DataImage:
 class DataConfocalScan(DataImage):
     allowed_file_extensions = ['mat']
 
-    def __init__(self, file_name, folder_name='.', spectral_range='all', unit_spectral_range=None):
+    def __init__(self, file_name, folder_name='.', spectral_range='all', unit_spectral_range=None, baseline = None, method = 'sum'):
 
         self.spectral_range = spectral_range
         self.unit_spectral_range = unit_spectral_range
+        self.method = method
+        self.baseline = {}
+        if baseline != None:
+            if '_' in baseline:
+                baseline_keyword_components = baseline.split('_')
+                baseline_type = baseline_keyword_components[0]
+                baseline_method_left = baseline_keyword_components[1].split('-')[0]
+                baseline_points_left = int(baseline_keyword_components[1].split('-')[1])
+                baseline_method_right = baseline_keyword_components[2].split('-')[0]
+                baseline_points_right = int(baseline_keyword_components[2].split('-')[1])
+            else:
+                baseline_type = baseline
+                baseline_method_left = 'edge'
+                baseline_points_left = 20
+                baseline_method_right = 'edge'
+                baseline_points_right = 20
+            self.baseline['type'] = baseline_type
+            self.baseline['method_left'] = baseline_method_left
+            self.baseline['method_right'] = baseline_method_right
+            self.baseline['points_left'] = baseline_points_left
+            self.baseline['points_right'] = baseline_points_right
+        else:
+            self.baseline['type'] = None
+
         super().__init__(file_name, folder_name, self.allowed_file_extensions)
 
     def get_data(self):
@@ -173,19 +223,122 @@ class DataConfocalScan(DataImage):
 
                 self.image_data_from_spectra = []
                 for ix, x_position in enumerate(self.x):
-                    integrated_counts_along_y = []
+                    counts_for_image_along_y = []
                     for iy, y_position in enumerate(self.y):
+                        position_string = convert_xy_to_position_string([x_position, y_position])
                         spectrum = pd.DataFrame(
                             data={'x_nm': self.wavelength, 'y_counts_per_seconds': self.spectra_raw[iy][ix]})
                         spectrum['x_eV'] = self.photon_energy
                         if self.spectral_range != 'all':
+                            if self.baseline['type'] != None:
+                                self.baseline[position_string] = {}
+                                if self.baseline['method_left'] == 'edge':
+                                    index_left = np.abs(spectrum['x_{0}'.format(self.unit_spectral_range)] - self.spectral_range[0]).idxmin()
+                                elif self.baseline['method_left'] == 'minimum':
+                                    index_left = spectrum.loc[(spectrum['x_{0}'.format(self.unit_spectral_range)] >= self.spectral_range[0]) & (
+                                                    spectrum['x_{0}'.format(self.unit_spectral_range)] <= self.spectral_range[1])]['y_counts_per_seconds'].idxmin()
+                                elif self.baseline['method_left'] == 'maximum':
+                                    index_left = spectrum.loc[(spectrum['x_{0}'.format(self.unit_spectral_range)] >= self.spectral_range[0]) & (
+                                                    spectrum['x_{0}'.format(self.unit_spectral_range)] <= self.spectral_range[1])]['y_counts_per_seconds'].idxmax()
+                                if self.baseline['method_right'] == 'edge':
+                                    index_right = np.abs(spectrum['x_{0}'.format(self.unit_spectral_range)] - self.spectral_range[1]).idxmin()
+                                elif self.baseline['method_right'] == 'minimum':
+                                    index_right = spectrum.loc[(spectrum['x_{0}'.format(self.unit_spectral_range)] >= self.spectral_range[0]) & (
+                                                    spectrum['x_{0}'.format(self.unit_spectral_range)] <= self.spectral_range[1])]['y_counts_per_seconds'].idxmin()
+                                elif self.baseline['method_right'] == 'maximum':
+                                    index_right = spectrum.loc[(spectrum['x_{0}'.format(self.unit_spectral_range)] >= self.spectral_range[0]) & (
+                                                    spectrum['x_{0}'.format(self.unit_spectral_range)] <= self.spectral_range[1])]['y_counts_per_seconds'].idxmax()
+                                sub_spectrum_for_fitting_left = spectrum.loc[index_left - self.baseline['points_left'] : index_left + self.baseline['points_left']]
+                                sub_spectrum_for_fitting_right = spectrum.loc[index_right - self.baseline['points_right'] : index_right + self.baseline['points_right']]
+                                if 'bi' not in self.baseline['type']:
+                                    self.baseline[position_string]['sub_spectrum_for_fitting'] = pd.concat([sub_spectrum_for_fitting_left, sub_spectrum_for_fitting_right], ignore_index = True)
+                                self.baseline[position_string]['sub_spectrum_for_fitting_left'] = sub_spectrum_for_fitting_left
+                                self.baseline[position_string]['sub_spectrum_for_fitting_right'] = sub_spectrum_for_fitting_right
+                                try:
+                                    set_pixel_to_zero = False
+                                    if self.baseline['type'] == 'linear':
+                                        p0 = guess_initial_parameters(self.baseline[position_string]['sub_spectrum_for_fitting']['x_{0}'.format(self.unit_spectral_range)],
+                                                                                     self.baseline[position_string]['sub_spectrum_for_fitting']['y_counts_per_seconds'], 'linear')
+                                        parameters, covariance = spo.curve_fit(line, self.baseline[position_string]['sub_spectrum_for_fitting']['x_{0}'.format(self.unit_spectral_range)],
+                                                                                     self.baseline[position_string]['sub_spectrum_for_fitting']['y_counts_per_seconds'], p0 = p0)
+                                        self.baseline[position_string]['slope_initial'] = p0[0]
+                                        self.baseline[position_string]['intersect_initial'] = p0[1]
+                                        self.baseline[position_string]['slope'] = parameters[0]
+                                        self.baseline[position_string]['intersect'] = parameters[1]
+                                    elif self.baseline['type'] == 'minimum':
+                                        self.baseline[position_string]['offset'] = spectrum['y_counts_per_seconds'].min()
+                                    elif self.baseline['type'] == 'exponential':
+                                        p0 = guess_initial_parameters(self.baseline[position_string]['sub_spectrum_for_fitting']['x_{0}'.format(self.unit_spectral_range)],
+                                                                                     self.baseline[position_string]['sub_spectrum_for_fitting']['y_counts_per_seconds'], 'exponential')
+                                        parameters, covariance = spo.curve_fit(exponential, self.baseline[position_string]['sub_spectrum_for_fitting']['x_{0}'.format(self.unit_spectral_range)],
+                                                                                     self.baseline[position_string]['sub_spectrum_for_fitting']['y_counts_per_seconds'], p0 = p0)
+                                        self.baseline[position_string]['prefactor_initial'] = p0[0]
+                                        self.baseline[position_string]['exponent_initial'] = p0[1]
+                                        self.baseline[position_string]['shift_initial'] = p0[2]
+                                        self.baseline[position_string]['prefactor'] = parameters[0]
+                                        self.baseline[position_string]['exponent'] = parameters[1]
+                                        self.baseline[position_string]['shift'] = parameters[2]
+                                    elif self.baseline['type'] == 'bilinear':
+                                        p0 = guess_initial_parameters(sub_spectrum_for_fitting_left['x_{0}'.format(self.unit_spectral_range)], sub_spectrum_for_fitting_left['y_counts_per_seconds'], 'linear')
+                                        parameters, covariance = spo.curve_fit(line, sub_spectrum_for_fitting_left['x_{0}'.format(self.unit_spectral_range)], sub_spectrum_for_fitting_left['y_counts_per_seconds'], p0 = p0)
+                                        self.baseline[position_string]['slope_initial_left'] = p0[0]
+                                        self.baseline[position_string]['intersect_initial_left'] = p0[1]
+                                        self.baseline[position_string]['slope_left'] = parameters[0]
+                                        self.baseline[position_string]['intersect_left'] = parameters[1]
+                                        p0 = guess_initial_parameters(sub_spectrum_for_fitting_right['x_{0}'.format(self.unit_spectral_range)], sub_spectrum_for_fitting_right['y_counts_per_seconds'], 'linear')
+                                        parameters, covariance = spo.curve_fit(line, sub_spectrum_for_fitting_right['x_{0}'.format(self.unit_spectral_range)], sub_spectrum_for_fitting_right['y_counts_per_seconds'], p0 = p0)
+                                        self.baseline[position_string]['slope_initial_right'] = p0[0]
+                                        self.baseline[position_string]['intersect_initial_right'] = p0[1]
+                                        self.baseline[position_string]['slope_right'] = parameters[0]
+                                        self.baseline[position_string]['intersect_right'] = parameters[1]
+                                except RuntimeError:
+                                    set_pixel_to_zero = True
                             spectrum = spectrum.loc[
                                 (spectrum['x_{0}'.format(self.unit_spectral_range)] >= self.spectral_range[0]) & (
                                             spectrum['x_{0}'.format(self.unit_spectral_range)] <= self.spectral_range[1])]
-                        # Background correction
-                        integrated_counts = spectrum['y_counts_per_seconds'].sum()
-                        integrated_counts_along_y.append(integrated_counts)
-                    self.image_data_from_spectra.append(integrated_counts_along_y)
+
+                            if self.baseline['type'] != None and not set_pixel_to_zero:
+                                self.baseline[position_string]['x'] = spectrum['x_{0}'.format(self.unit_spectral_range)]
+                                if self.baseline['type']== 'linear':
+                                    self.baseline[position_string]['y'] = line(self.baseline[position_string]['x'], self.baseline[position_string]['slope'], self.baseline[position_string]['intersect'])
+                                    self.baseline[position_string]['y_initial'] = line(self.baseline[position_string]['x'], self.baseline[position_string]['slope_initial'], self.baseline[position_string]['intersect_initial'])
+                                elif self.baseline['type'] == 'exponential':
+                                    self.baseline[position_string]['y'] = exponential(self.baseline[position_string]['x'], self.baseline[position_string]['prefactor'], self.baseline[position_string]['exponent'], self.baseline[position_string]['shift'])
+                                    self.baseline[position_string]['y_initial'] = exponential(self.baseline[position_string]['x'], self.baseline[position_string]['prefactor_initial'], self.baseline[position_string]['exponent_initial'], self.baseline[position_string]['shift_initial'])
+                                elif self.baseline['type'] == 'minimum':
+                                    self.baseline[position_string]['y'] = line(self.baseline[position_string]['x'], 0, self.baseline[position_string]['offset'])
+                                elif self.baseline['type'] == 'bilinear':
+                                    line_left = line(self.baseline[position_string]['x'], self.baseline[position_string]['slope_left'], self.baseline[position_string]['intersect_left'])
+                                    line_right = line(self.baseline[position_string]['x'], self.baseline[position_string]['slope_right'], self.baseline[position_string]['intersect_right'])
+                                    self.baseline[position_string]['y'] = np.maximum(line_left, line_right)
+                                    line_left_initial = line(self.baseline[position_string]['x'], self.baseline[position_string]['slope_initial_left'], self.baseline[position_string]['intersect_initial_left'])
+                                    line_right_initial = line(self.baseline[position_string]['x'], self.baseline[position_string]['slope_initial_right'], self.baseline[position_string]['intersect_initial_right'])
+                                    self.baseline[position_string]['y_initial'] = np.maximum(line_left, line_right)
+                                spectrum['y_counts_per_seconds'] = spectrum['y_counts_per_seconds'] - self.baseline[position_string]['y']
+
+                        if self.method == 'sum':
+                            counts_for_image = spectrum['y_counts_per_seconds'].sum()
+                        elif self.method == 'maximum_position':
+                            index = spectrum['y_counts_per_seconds'].idxmax()
+                            counts_for_image = spectrum.loc[index, 'x_{0}'.format(self.unit_spectral_range)]
+                        elif self.method == 'center_of_mass_position':
+                            weights = np.maximum(spectrum['y_counts_per_seconds'], 0)
+                            counts_for_image = np.average(spectrum['x_{0}'.format(self.unit_spectral_range)].to_numpy(), weights = weights)
+                        elif 'local_maximum_position' in self.method:
+                            spectrum.reset_index(drop = True, inplace = True)
+                            indexes, _ = sps.find_peaks(spectrum['y_counts_per_seconds'].values, prominence = (spectrum['y_counts_per_seconds'].max()-spectrum['y_counts_per_seconds'].min())/10)
+                            number = int(self.method.split('local_maximum_position_')[1]) - 1
+                            try:
+                                counts_for_image = spectrum.loc[indexes[number], 'x_{0}'.format(self.unit_spectral_range)]
+                            except IndexError:
+                                counts_for_image = np.NaN
+
+
+                        if self.baseline['type'] != None and (set_pixel_to_zero or counts_for_image < 0):
+                            counts_for_image = np.NaN
+
+                        counts_for_image_along_y.append(counts_for_image)
+                    self.image_data_from_spectra.append(counts_for_image_along_y)
                 self.image_data_from_spectra = np.transpose(self.image_data_from_spectra)
             else:
                 self.type = 'SPCM'
@@ -232,7 +385,7 @@ class DataConfocalScan(DataImage):
                                      self.extent['y_max']],
                              interpolation=interpolation)
         else:
-            default_scale = {'minimum_value': 0, 'maximum_value': np.Inf, 'norm': None, 'color_map': 'gray'}
+            default_scale = {'minimum_value': np.min(self.image_data_to_plot), 'maximum_value': np.max(self.image_data_to_plot), 'norm': None, 'color_map': 'gray'}
             for key in default_scale:
                 if key not in scale:
                     scale[key] = default_scale[key]
@@ -284,10 +437,21 @@ class DataConfocalScan(DataImage):
             divider = make_axes_locatable(axes)
             cax = divider.append_axes('right', size='5%', pad=0.05)
             cbar = figure.colorbar(im, cax=cax, orientation='vertical')
-            if scale == 'Normalized':
-                cax.set_ylabel('Normalized PL-Intensity (rel. units)')
-            else:
-                cax.set_ylabel('PL-Intensity (counts/second)')
+            if self.method == 'sum':
+                if scale == 'Normalized':
+                    cax.set_ylabel('Normalized PL-Intensity (rel. units)')
+                else:
+                    cax.set_ylabel('PL-Intensity (counts/second)')
+            elif 'position' in self.method:
+                if self.unit_spectral_range == 'eV':
+                    cax.set_ylabel('Photon Energy (eV)')
+                elif self.unit_spectral_range == 'nm':
+                    cax.set_ylabel('Wavelength (nm)')
+
+        # Set nan pixel to red
+        color_map = mpl.cm.get_cmap()
+        color_map.set_bad(color = 'white', alpha = 0)
+
 
         # Add figure and axes for to self further manipulation
         self.image = {'figure': figure, 'axes': axes}
@@ -347,9 +511,50 @@ class DataConfocalScan(DataImage):
 
         return True
 
+    def add_histogram(self, image_from_spectra = False, plot_style = None, bins = 'auto'):
+        # Set plotting style
+        if plot_style is not None:
+            plt.style.use(plot_style)
+
+        # Generate figure, axes
+        figure = plt.figure(figsize=(15, 10))
+        axes = figure.add_subplot(1, 1, 1)
+
+        axes.set_ylabel('Frequency')
+        if self.method == 'sum':
+            axes.set_xlabel('PL-Intensity (counts/second)')
+        elif 'position' in self.method:
+            if self.unit_spectral_range == 'eV':
+                axes.set_xlabel('Photon Energy (eV)')
+            elif self.unit_spectral_range == 'nm':
+                axes.set_xlabel('Wavelength (nm)')
+
+        # Plot image
+        if image_from_spectra:
+            self.histogram_data = self.image_data_from_spectra.flatten()
+        else:
+            self.histogram_data = self.image_data.flatten()
+
+        if bins == 'auto':
+            bins = int(np.sqrt(len(self.histogram_data)))
+
+        axes.hist(self.histogram_data, bins = bins)
+
+        # Add figure and axes for to self further manipulation
+        self.histogram = {'figure': figure, 'axes': axes}
+
+        return True
+
+
     def save_image(self, title, file_extension='pdf', folder='.'):
         title = '{0}/{1}.{2}'.format(folder, title, file_extension)
         self.image['figure'].savefig(title, bbox_inches='tight', transparent=True)
+
+        return True
+
+    def save_histogram(self, title, file_extension='pdf', folder='.'):
+        title = '{0}/{1}.{2}'.format(folder, title, file_extension)
+        self.histogram['figure'].savefig(title, bbox_inches='tight', transparent=True)
 
         return True
 
@@ -450,6 +655,10 @@ class DataHyperSpectral:
 
         # Turn axes labels/ticks off
         plt.axis('off')
+
+        # Set nan pixel to red
+        color_map = mpl.cm.get_cmap()
+        color_map.set_bad(color = 'white', alpha = 0)
 
         # Add figure and axes for to self further manipulation
         self.image = {'figure': figure, 'axes': axes}

@@ -44,6 +44,17 @@ def convert_file_string_to_float(string, key_unit, allowed_units):
         return float(string) * unit_multiplier
 
 
+class DataDictSpectrum(Dict26):
+    default_keys = ['cal_data', 'exposure_time_secs', 'cycles',
+                    'wavelength_offset_nm', 'background_counts_per_second',
+                    'background_counts_per_cycle', 'background_counts']
+    allowed_units = {'Length': unit_families['Length'], 'Energy': unit_families['Energy'],
+                     'Time': unit_families['Time']}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(default_keys=self.default_keys, allowed_units=self.allowed_units, spacer='_', *args, **kwargs)
+
+
 class DataDictSIF(Dict26):
     default_keys = ['cal_data', 'exposure_time_secs', 'cycles',
                     'wavelength_offset_nm', 'background_counts_per_second',
@@ -119,6 +130,73 @@ class DataDictLaserInfo(Dict26):
         for info, key in zip(info_string_components, self.default_keys):
             if self.get_units(key) is None:
                 self[key] = info
+            elif info[:5] == 'sweep':
+                self[key] = [convert_file_string_to_float(info.split('to')[0][5:],
+                                                          self.get_units(key), self.allowed_units),
+                             convert_file_string_to_float(info.split('to')[1].split('step')[0],
+                                                          self.get_units(key), self.allowed_units),
+                             convert_file_string_to_float(info.split('to')[1].split('step')[1],
+                                                          self.get_units(key), self.allowed_units)]
+            else:
+                self[key] = convert_file_string_to_float(info, self.get_units(key), self.allowed_units)
+        return True
+
+
+class DataDictRFSourceInfo(Dict26):
+    default_keys_with_acronyms = {'Type': 'type',
+                                  'Frequency (MHz)': 'frequency',
+                                  'Power (dBm)': 'power',
+                                  'Circuit components': 'circuit_components'}
+    default_keys = [key for key in default_keys_with_acronyms]
+    allowed_units = {'Frequency': unit_families['Frequency'], 'Power': unit_families['Power']}
+
+    default_head_keys = ['RF Source']
+
+    def __init__(self, head_key='RF Source', *args, **kwargs):
+        super().__init__(default_keys=self.default_keys, allowed_units=self.allowed_units, spacer=' ',
+                         restrict_to_defaults=True, *args, **kwargs)
+        if head_key in self.default_head_keys:
+            self.head_key = head_key
+            for key in self.default_keys:
+                self.setdefault(key, None)
+        else:
+            raise RuntimeError('Given head_key cannot be found in default_head_keys list')
+
+    def __setitem__(self, key, value):
+        super(DataDictRFSourceInfo, self).__setitem__(key, value)
+        unit = self.get_units(key)
+        if unit is None:
+            setattr(self, self.default_keys_with_acronyms[key].lower().strip(' '), value)
+        else:
+            if isinstance(value, list):
+                setattr(self, self.default_keys_with_acronyms[key].lower().strip(' '),
+                        UnitClassList(value, unit))
+            else:
+                setattr(self, self.default_keys_with_acronyms[key].lower().strip(' '),
+                        UnitClass(value, unit))
+
+    def get_units(self, key):
+        for family in self.allowed_units:
+            for unit in self.allowed_units[family]:
+                if key.split(' ')[-1].strip('()') == unit:
+                    return unit
+
+        return None
+
+    def get_info(self, string):
+        if string is None:
+            return False
+        info_string_components = string.split('-')
+        for info, key in zip(info_string_components, self.default_keys):
+            if self.get_units(key) is None:
+                self[key] = info
+            elif info[:5] == 'sweep':
+                self[key] = [convert_file_string_to_float(info.split('to')[0][5:],
+                                                          self.get_units(key), self.allowed_units),
+                             convert_file_string_to_float(info.split('to')[1].split('step')[0],
+                                                          self.get_units(key), self.allowed_units),
+                             convert_file_string_to_float(info.split('to')[1].split('step')[1],
+                                                          self.get_units(key), self.allowed_units)]
             else:
                 self[key] = convert_file_string_to_float(info, self.get_units(key), self.allowed_units)
         return True
@@ -128,7 +206,8 @@ class DataDictPathOpticsInfo(Dict26):
     default_keys_with_acronyms = {'Half-Waveplate Angle (deg)': 'WP2',
                                   'Quarter-Waveplate Angle (deg)': 'WP4',
                                   'Polarizer': 'Plr',
-                                  'Pinhole': 'PnH'}
+                                  'Pinhole': 'PnH',
+                                  'Filter': 'Flt'}
     default_keys = [key for key in default_keys_with_acronyms]
     allowed_units = {'Angle': unit_families['Angle']}
 
@@ -188,6 +267,7 @@ class DataDictFilenameInfo(Dict26):
                                        'Sample Name': 'Smp',
                                        'Laser': 'Lsr',
                                        'Secondary Laser': 'Ls2',
+                                       'RF Source': 'RFS',
                                        'Magnetic Field (T)': 'MgF',
                                        'Temperature (K)': 'Tmp',
                                        'Measurement Type': 'MsT',
@@ -199,10 +279,11 @@ class DataDictFilenameInfo(Dict26):
     # getting additional information dictionary
     lsr_info = DataDictLaserInfo('Laser')
     ls2_info = DataDictLaserInfo('Secondary Laser')
+    rfs_info = DataDictRFSourceInfo('RF Source')
     exc_info = DataDictPathOpticsInfo('Excitation Path Optics')
     col_info = DataDictPathOpticsInfo('Collection Path Optics')
     enc_info = DataDictPathOpticsInfo('Excitation and Collection Path Optics')
-    file_additional_info_list = [lsr_info, ls2_info, exc_info, col_info, enc_info]
+    file_additional_info_list = [lsr_info, ls2_info, rfs_info, exc_info, col_info, enc_info]
     # returning head_key dict for all fai
     fai_head_keys_dict = {fai.head_key: fai for fai in file_additional_info_list}
 
@@ -281,28 +362,37 @@ class DataDictFilenameInfo(Dict26):
         return self.default_main_keys_with_acronyms[head_key] + self.key_sub_key_separator + sub_key
 
     def get_info(self, file_info_raw_components):
-        self['File Number'] = int(file_info_raw_components[0])  # Filename starts with file number
-        # Loop through the components of the file_name and check which of the default_main_keys_with_acronyms they contain
+        try:
+            self['File Number'] = int(file_info_raw_components[0])  # Filename starts with file number
+        except:
+            warnings.warn('Filename does not follow filenaming convention')
+        # Loop through the components of the file_name and check which of the default_main_keys_with_acronyms
+        # they contain
         # Extract the corresponding info and save
         # If some key is not part of the file name, set corresponding entry to None
-        for firc in file_info_raw_components[1:]:
-            for dmk in self.default_main_keys_with_acronyms:
-                # getting main info
-                if firc.startswith(self.default_main_keys_with_acronyms[dmk]):
-                    info = firc.split('{0}~'.format(self.default_main_keys_with_acronyms[dmk]))[1]
-                    if self.get_units(dmk) is None:
-                        self[dmk] = info
-                    else:
-                        self[dmk] = convert_file_string_to_float(info, self.get_units(dmk), self.allowed_units)
-                    break
-
-                # Some keys can contain more than one piece of information
-                # for example, Lsr~cw-720 -> Type = cw,  Wavelength (nm) = 720, and Power (nW) = 100
-                # getting additional info in separate keys
-                if dmk in self.fai_head_keys_dict.keys():
-                    self.fai_head_keys_dict[dmk].get_info(self[dmk])
-                    for sub_key in self.fai_head_keys_dict[dmk]:
-                        self[self.get_sub_key_string(dmk, sub_key)] = self.fai_head_keys_dict[dmk][sub_key]
+        try:
+            for firc in file_info_raw_components[1:]:
+                for dmk in self.default_main_keys_with_acronyms:
+                    # getting main info
+                    try:
+                        if firc.startswith(self.default_main_keys_with_acronyms[dmk]):
+                            info = firc.split('{0}~'.format(self.default_main_keys_with_acronyms[dmk]))[1]
+                            if self.get_units(dmk) is None:
+                                self[dmk] = info
+                            else:
+                                self[dmk] = convert_file_string_to_float(info, self.get_units(dmk), self.allowed_units)
+                            break
+                        # Some keys can contain more than one piece of information
+                        # for example, Lsr~cw-720 -> Type = cw,  Wavelength (nm) = 720, and Power (nW) = 100
+                        # getting additional info in separate keys
+                        if dmk in self.fai_head_keys_dict.keys():
+                            self.fai_head_keys_dict[dmk].get_info(self[dmk])
+                            for sub_key in self.fai_head_keys_dict[dmk]:
+                                self[self.get_sub_key_string(dmk, sub_key)] = self.fai_head_keys_dict[dmk][sub_key]
+                    except:
+                        warnings.warn('Filename does not follow filenaming convention')
+        except:
+            warnings.warn('Filename does not follow filenaming convention')
         return True
 
 # @dataclass

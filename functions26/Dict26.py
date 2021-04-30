@@ -3,7 +3,7 @@
 # by Vasilis Niaouris
 
 from collections import UserDict
-
+import warnings
 
 # Dict26 is a pandas Dictionary spin-off for the 26 room.
 # We want to be able to change the units of the data without saving the data in all the different possible units
@@ -50,7 +50,6 @@ class Dict26(UserDict):
     # allowed_units example: allowed_units = {'Length': {'nm': 1., 'um': 1.e-3}, 'Energy': {'eV': 1., 'meV': 1.e3}}
     # default_keys example: default_keys = ['x_nm', 'x_eV']
     def __init__(self, default_keys=None, allowed_units=None, spacer=None, restrict_to_defaults=False, *args, **kwargs):
-        super().__init__(*args, **kwargs)
         if default_keys is None:
             self.default_keys = []
         else:
@@ -61,10 +60,15 @@ class Dict26(UserDict):
             self.set_allowed_units(allowed_units)
         if spacer == '_' or spacer == ' ':
             self.spacer = spacer
+        elif spacer is None:
+            print('DataFrame26 spacer was not given. Set to default: _')
+            self.spacer = '_'
         else:
-            print('Dict26 Spacer was not valid or not given. Set to default: _. ')
+            warnings.warn('DataFrame26 spacer not valid. Set to default: _')
             self.spacer = '_'
         self.restrict_to_defaults = restrict_to_defaults
+
+        super().__init__(*args, **kwargs)
 
     # this function is called if you for example call: Dict26object[key] = [3,4] (have to assign values)
     # the modified setitem, makes sure we are not adding any keys not listed in default_keys
@@ -126,7 +130,8 @@ class Dict26(UserDict):
     # A function to help change the default_keys if necessary
     def set_default_keys(self, default_keys):
         if isinstance(default_keys, list):
-            if all(isinstance(item, str) for item in default_keys):
+            if all(isinstance(item, str) for item in default_keys) or len(default_keys) == 0:
+                # after or we check for empty lists
                 self.default_keys = default_keys
                 return True
 

@@ -96,6 +96,25 @@ def send_email(sender_id='', sender_server='gmail.com', sender_password='', reci
         return 0
 
 
+def add_extension_if_necessary(filename, extension):
+    if extension[0] != '.':
+        extension = '.' + extension
+    # finding if filename has ending same as extension and if not, it adds the extension ending to the file
+    filename_ending = filename.split('.')[-1]
+    if filename_ending != extension[1:]:
+        filename = filename + extension
+
+    return filename
+
+
+def is_str_containing_float(string):
+    try:
+        float(string)
+        return True
+    except ValueError:
+        return False
+
+
 # def valid_emails(recipients):
 #     # checking recipient validity (only if the email is valid, not if it actually exists).
 #     if len(recipients) == 0:

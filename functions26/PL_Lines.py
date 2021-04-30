@@ -8,6 +8,9 @@ import pandas as pd
 import seaborn as sns
 # Import constants
 from .constants import conversion_factor_nm_to_ev  # eV*nm
+n_air = 1.000293 # https://en.wikipedia.org/wiki/List_of_refractive_indices
+LO_phonon_energy = {} # energy of the longitudinal optical phonon
+LO_phonon_energy['ZnO'] = 0.072 # eV, Wagner's dissertation
 
 # Create dict of dataframes containing PL reference lines:
 PL_lines = {}
@@ -17,8 +20,6 @@ PL_lines = {}
 # Neutral Donor-bound Excitions (D0X):
 # low temperature
 # Strassburg et al., pss (b) 241 (2004) + Meyer et al., pss (b) 241 (2004) + Kumar et al., # Journal of Luminescence 176 (2016) [extracted from plot using inkscape]
-# medium temperature
-# Kumar et al., Journal of Luminescence 176 (2016) [extracted from plot using inkscape]
 # TES of D0X:
 # InZn, SnZn-LiZn: Kumar et al., Journal of Luminescence 176 (2016) [extracted from plot using inkscape] + Wagner et al., PRB 84 (2011)
 # Hi, GaZn, AlZn: Wagner et al., PRB 84 (2011)
@@ -43,6 +44,18 @@ PL_lines['ZnO'] = pd.DataFrame(
                                 ['Neutral Donor-bound Excitons','SnZnLiZnX_0',r'$\left(\mathrm{Sn}_\mathrm{Zn}-\mathrm{Li}_\mathrm{Zn}\right)^\mathrm{0}$-X',3.3534,
                                                                                 'low','(Sn<sub>Zn</sub>-Li<sub>Zn</sub>)<sup>0</sup>-X'],
                                 ['Neutral Donor-bound Excitons','HiX_0',r'H$_\mathrm{i}^\mathrm{0}$-X',3.3628,'low','(H<sub>i</sub>)<sup>0</sup>-X'],
+                                ['1-Phonon Replica of Neutral Donor-bound Excitons','AlZnX_0-LO',r'Al$_\mathrm{Zn}^\mathrm{0}$-X-LO',3.3608 - LO_phonon_energy['ZnO'],'low','(Al<sub>Zn</sub>)<sup>0</sup>-X-LO'],
+                                ['1-Phonon Replica of Neutral Donor-bound Excitons','GaZnX_0-LO',r'Ga$_\mathrm{Zn}^\mathrm{0}$-X-LO',3.3598 - LO_phonon_energy['ZnO'],'low','(Ga<sub>Zn</sub>)<sup>0</sup>-X-LO'],
+                                ['1-Phonon Replica of Neutral Donor-bound Excitons','InZnX_0-LO',r'In$_\mathrm{Zn}^\mathrm{0}$-X-LO',3.3567 - LO_phonon_energy['ZnO'],'low','(In<sub>Zn</sub>)<sup>0</sup>-X-LO'],
+                                ['1-Phonon Replica of Neutral Donor-bound Excitons','SnZnLiZnX_0-LO',r'$\left(\mathrm{Sn}_\mathrm{Zn}-\mathrm{Li}_\mathrm{Zn}\right)^\mathrm{0}$-X-LO',3.3534 - LO_phonon_energy['ZnO'],
+                                                                                'low','(Sn<sub>Zn</sub>-Li<sub>Zn</sub>)<sup>0</sup>-X-LO'],
+                                ['1-Phonon Replica of Neutral Donor-bound Excitons','HiX_0-LO',r'H$_\mathrm{i}^\mathrm{0}$-X-LO',3.3628 - LO_phonon_energy['ZnO'],'low','(H<sub>i</sub>)<sup>0</sup>-X-LO'],
+                                ['2-Phonon Replica of Neutral Donor-bound Excitons','AlZnX_0-2LO',r'Al$_\mathrm{Zn}^\mathrm{0}$-X-2LO',3.3608 - 2*LO_phonon_energy['ZnO'],'low','(Al<sub>Zn</sub>)<sup>0</sup>-X-2LO'],
+                                ['2-Phonon Replica of Neutral Donor-bound Excitons','GaZnX_0-2LO',r'Ga$_\mathrm{Zn}^\mathrm{0}$-X-2LO',3.3598 - 2*LO_phonon_energy['ZnO'],'low','(Ga<sub>Zn</sub>)<sup>0</sup>-X-2LO'],
+                                ['2-Phonon Replica of Neutral Donor-bound Excitons','InZnX_0-2LO',r'In$_\mathrm{Zn}^\mathrm{0}$-X-2LO',3.3567 - 2*LO_phonon_energy['ZnO'],'low','(In<sub>Zn</sub>)<sup>0</sup>-X-2LO'],
+                                ['2-Phonon Replica of Neutral Donor-bound Excitons','SnZnLiZnX_0-2LO',r'$\left(\mathrm{Sn}_\mathrm{Zn}-\mathrm{Li}_\mathrm{Zn}\right)^\mathrm{0}$-X-2LO',3.3534 - 2*LO_phonon_energy['ZnO'],
+                                                                                'low','(Sn<sub>Zn</sub>-Li<sub>Zn</sub>)<sup>0</sup>-X-2LO'],
+                                ['2-Phonon Replica of Neutral Donor-bound Excitons','HiX_0-2LO',r'H$_\mathrm{i}^\mathrm{0}$-X-2LO',3.3628 - 2*LO_phonon_energy['ZnO'],'low','(H<sub>i</sub>)<sup>0</sup>-X-2LO'],
                                 ['I lines','I_0',r'I$_\mathrm{0}$',3.3725,'low','I<sub>0</sub>'],
                                 ['I lines','I_1',r'I$_\mathrm{1}$',3.3718,'low','I<sub>1</sub>'],
                                 ['I lines','I_1a',r'I$_\mathrm{1a}$',3.3679,'low','I<sub>1a</sub>'],
@@ -53,11 +66,31 @@ PL_lines['ZnO'] = pd.DataFrame(
                                 ['I lines','I_7',r'I$_\mathrm{7}$',3.3601,'low','I<sub>7</sub>'],
                                 ['I lines','I_7a',r'I$_\mathrm{7a}$',3.3718,'low','I<sub>7a</sub>'],
                                 ['I lines','I_8a',r'I$_\mathrm{8a}$',3.3593,'low','I<sub>8a</sub>'],
-                                ['I lines','I_11',r'I$_\mathrm{11}$',3.3484,'low','I<sub>11</sub>']
+                                ['I lines','I_11',r'I$_\mathrm{11}$',3.3484,'low','I<sub>11</sub>'],
+                                ['Ionized Donor-bound Excitons','AlZnX_p',r'Al$_\mathrm{Zn}^\mathrm{+}$-X',3.3734,'low','(Al<sub>Zn</sub>)<sup>+</sup>-X'],
+                                ['Ionized Donor-bound Excitons','GaZnX_p',r'Ga$_\mathrm{Zn}^\mathrm{+}$-X',3.3718,'low','(Ga<sub>Zn</sub>)<sup>+</sup>-X'],
+                                ['Ionized Donor-bound Excitons','InZnX_p',r'In$_\mathrm{Zn}^\mathrm{+}$-X',3.3676,'low','(In<sub>Zn</sub>)<sup>+</sup>-X'],
+                                ['Ionized Donor-bound Excitons','SnZnLiZnX_p',r'$\left(\mathrm{Sn}_\mathrm{Zn}-\mathrm{Li}_\mathrm{Zn}\right)^\mathrm{+}$-X',3.3632,
+                                                                                'low','(Sn<sub>Zn</sub>-Li<sub>Zn</sub>)<sup>+</sup>-X'],
+                                ['Z lines','Z',r'Z',3.3608,'low','Z'],
+                                ['Y lines','Y_1',r'Y$_\mathrm{1}$',3.3328,'low','Y<sub>1</sub>'],
+                                ['Y lines','Y_2',r'Y$_\mathrm{2}$',3.3363,'low','Y<sub>2</sub>'],
+                                ['Y lines','Y_3',r'Y$_\mathrm{3}$',3.3465,'low','Y<sub>3</sub>'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2s)','TES_2s_AlZnX_0',r'Al$_\mathrm{Zn}^\mathrm{0}$-X (TES, 2s)',3.3228,'low','(Al<sub>Zn</sub>)<sup>0</sup>-X (TES, 2s)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2s)','TES_2s_GaZnX_0',r'Ga$_\mathrm{Zn}^\mathrm{0}$-X (TES, 2s)',3.3191,'low','(Ga<sub>Zn</sub>)<sup>0</sup>-X (TES, 2s)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2s)','TES_2s_InZnX_0',r'Ga$_\mathrm{Zn}^\mathrm{0}$-X (TES, 2s)',3.3101,'low','(In<sub>Zn</sub>)<sup>0</sup>-X (TES, 2s)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2s)','TES_2s_HiX_0',r'H$_\mathrm{i}^\mathrm{0}$-X (TES, 2s)',3.3278,'low','(H<sub>i</sub>)<sup>0</sup>-X (TES, 2s)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2s)','TES_2s_SnZnLiZnX_0',r'$\left(\mathrm{Sn}_\mathrm{Zn}-\mathrm{Li}_\mathrm{Zn}\right)^\mathrm{0}$-X (TES, 2s)',3.2986,
+                                                                                                                        'low','(Sn<sub>Zn</sub>-Li<sub>Zn</sub>)<sup>0</sup>-X (TES, 2s)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2p)','TES_2p_AlZnX_0',r'Al$_\mathrm{Zn}^\mathrm{0}$-X (TES, 2p)',3.3220,'low','(Al<sub>Zn</sub>)<sup>0</sup>-X (TES, 2p)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2p)','TES_2p_GaZnX_0',r'Ga$_\mathrm{Zn}^\mathrm{0}$-X (TES, 2p)',3.3177,'low','(Ga<sub>Zn</sub>)<sup>0</sup>-X (TES, 2p)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2p)','TES_2p_InZnX_0',r'In$_\mathrm{Zn}^\mathrm{0}$-X (TES, 2p)',3.3061,'low','(In<sub>Zn</sub>)<sup>0</sup>-X (TES, 2p)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2p)','TES_2p_HiX_0',r'H$_\mathrm{i}^\mathrm{0}$-X (TES, 2p)',3.3287,'low','(H<sub>i</sub>)<sup>0</sup>-X (TES, 2p)'],
+                                ['Two-electron satellites of Neutral Donor-bound Excitons (2p)','TES_2p_SnZnLiZnX_0',r'$\left(\mathrm{Sn}_\mathrm{Zn}-\mathrm{Li}_\mathrm{Zn}\right)^\mathrm{0}$-X (TES, 2p)',3.2929,
+                                                                                                                        'low','(Sn<sub>Zn</sub>-Li<sub>Zn</sub>)<sup>0</sup>-X (TES, 2p)']
                                 ],
-                                columns = ['line_class','line_identifier','line_latex','x_eV','temperature', 'line_html']
+                                columns = ['line_class','line_identifier','line_identifier_latex','x_eV','temperature', 'line_identfier_html']
                                 )
-
 
 class PL_Lines:
     def __init__(self, material = 'ZnO', temperature = 'low'):
@@ -66,11 +99,11 @@ class PL_Lines:
 
         self.import_database()
 
-    def import_database(self):
-        self.lines = PL_lines[self.material]
-        self.lines = self.lines[self.lines['temperature'] == self.temperature]
-        self.lines.reset_index(drop = True, inplace = True)
+    def import_database(self, refractive_index = n_air):
+        self.database = PL_lines[self.material]
+        self.database = self.database[self.database['temperature'] == self.temperature]
+        self.database.reset_index(drop = True, inplace = True)
 
-        self.lines['x_nm'] = conversion_factor_nm_to_ev/self.lines['x_eV']
+        self.database['x_nm'] = conversion_factor_nm_to_ev/self.database['x_eV']/refractive_index
 
         return True

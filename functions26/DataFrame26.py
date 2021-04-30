@@ -52,7 +52,8 @@ class DataFrame26(DataFrame):
     # the modified init, checks if we gave the default_keys and allowed_units
     # allowed_units example: allowed_units = {'Length': {'nm': 1., 'um': 1.e-3}, 'Energy': {'eV': 1., 'meV': 1.e3}}
     # default_keys example: default_keys = ['x_nm', 'x_eV']
-    def __init__(self, default_keys=None, allowed_units=None, spacer=None, restrict_to_defaults=False, *args, **kwargs):
+    def __init__(self, default_keys=None, allowed_units=None, spacer=None, restrict_to_defaults=False, qdlf_datatype=None,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
         if default_keys is None:
             self.default_keys = []
@@ -64,10 +65,14 @@ class DataFrame26(DataFrame):
             self.set_allowed_units(allowed_units)
         if spacer == '_' or spacer == ' ':
             self.spacer = spacer
+        elif spacer is None:
+            warnings.warn('DataFrame26 spacer was not given. Set to default: _')
+            self.spacer = '_'
         else:
-            print('DataFrame26 spacer not valid. Set to default: _')
+            warnings.warn('DataFrame26 spacer not valid. Set to default: _')
             self.spacer = '_'
         self.restrict_to_defaults = restrict_to_defaults
+        self.qdlf_datatype = qdlf_datatype
 
     # this function is called if you for example call: dataframe26object[key] = [3,4] (have to assign values)
     # the modified setitem, makes sure we are not adding any keys not listed in default_keys
@@ -112,7 +117,8 @@ class DataFrame26(DataFrame):
     # A function to help change the default_keys if necessary
     def set_default_keys(self, default_keys):
         if isinstance(default_keys, list):
-            if all(isinstance(item, str) for item in default_keys):
+            if all(isinstance(item, str) for item in default_keys) or len(default_keys) == 0:
+                # after or we check for empty lists
                 with warnings.catch_warnings():  # suppressing the 'column can not be created with an attribute' warning
                     warnings.simplefilter('ignore', UserWarning)
                     self.default_keys = default_keys
@@ -141,6 +147,13 @@ class DataFrame26(DataFrame):
 
     def get_allowed_units(self):
         return self.allowed_units
+
+    def save_with_qdlf_data_manager(self, filename, qdlf_parameters_dict=None, qdlf_datatype=None):
+        from .filing.QDLFiling import QDLFDataManager
+        if qdlf_datatype is None:
+            qdlf_datatype = self.qdlf_datatype
+        filedm = QDLFDataManager(data=self, parameters=qdlf_parameters_dict, datatype=qdlf_datatype)
+        filedm.save(filename)
 
 # Import DataFrame26 and run next lines to see how it works
 # ee = DataFrame26(data={'x_nm': [2, 3]}, default_keys=['x_nm', 'x_eV'],

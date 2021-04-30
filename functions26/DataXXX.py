@@ -10,37 +10,79 @@ from .constants import conversion_factor_nm_to_ev  # eV*nm
 from .DataFrame26 import DataFrame26
 from .Dict26 import Dict26
 from .units import unit_families
-from .DataDictXXX import DataDictSIF, DataDictOP, DataDictT1
+from .DataDictXXX import DataDictSpectrum, DataDictSIF, DataDictOP, DataDictT1
 from .DataDictXXX import DataDictFilenameInfo, DataDictLaserInfo, DataDictPathOpticsInfo
 from .useful_functions import get_added_label_from_unit
+import scipy.optimize as spo
+import scipy.io as spio
+import pandas as pd
 import warnings
 
 
 class DataXXX:
 
-    def __init__(self, file_name, folder_name, default_keys, allowed_units, allowed_file_extensions, spacer):
+    def __init__(self, file_name, folder_name='.', default_keys=None, allowed_units=None, allowed_file_extensions=None,
+                 spacer=' ', qdlf_datatype=None):
         self.file_name = file_name
-        if file_name == '':
-            raise RuntimeError('File name is an empty string')
         self.folder_name = folder_name
-        self.file_extension = self.file_name.split('.')[-1]
-        self.check_file_type(allowed_file_extensions)
+        self.default_keys = default_keys
+        self.allowed_units = allowed_units
+        self.allowed_file_extensions = allowed_file_extensions
+        self.spacer = spacer
+        self.qdlf_datatype = qdlf_datatype
 
+        self.data = DataFrame26(default_keys, allowed_units, spacer, qdlf_datatype=self.qdlf_datatype)
+        self.labels = Dict26(default_keys, allowed_units, spacer)
+
+        self.file_extension = self.file_name.split('.')[-1]
+
+        if file_name == '':
+            raise ValueError('File name is an empty string')
+
+        self.check_file_type(allowed_file_extensions)
+        if self.file_extension == 'qdlf':
+            from .filing.QDLFiling import QDLFDataManager
+            qdlf_mng = QDLFDataManager.load(filename=self.file_name)
+            # check if this is a processed qdlf, or just a data file like the optical pumping qdlf files.
+            if all([parameter in qdlf_mng.parameters for parameter in ['filename info', 'additional info', 'labels']]):
+                self.data = qdlf_mng.data
+                self.file_info = DataDictFilenameInfo(**qdlf_mng.parameters['filename info'])
+                self.set_additional_info(qdlf_mng.parameters['additional info'])
+                self.labels = Dict26(default_keys, allowed_units, self.spacer, **qdlf_mng.parameters['labels'])
+                self.__post_load_qdlf__()
+                return
+
+        # is executed if 1. file extension is not qdlf and 2. if qdlf file does not contain filename info etc, meaning
+        # it is not a processed file
         self.file_info = DataDictFilenameInfo()
         self.get_file_info()
+        if self.get_data():
+            self.__post_init__()
 
-        self.data = DataFrame26(default_keys, allowed_units, spacer)
-        self.labels = Dict26(default_keys, allowed_units, spacer)
-        self.get_data()
+    def __post_init__(self):
+        # Define your own if needed. Used for post-initialization processing of data
+        pass
+
+    def __post_load_qdlf__(self):
+        # Define your own if needed. Used for post-initialization processing of qdlf data
+        pass
 
     def get_data(self):
         warnings.warn('Define your own get_data() function')
         pass
 
+    def get_additional_info(self):
+        # Define your own of needed
+        return dict()
+
+    def set_additional_info(self, info_dictionary):
+        # write your own if needed
+        pass
+
     def get_file_info(self):
 
         # Save filename without folder and file extension
-        file_info_raw = self.file_name.split('.')[-2]
+        file_info_raw = '.'.join(self.file_name.split('.')[:-1])
         if '/' in self.file_name:
             file_info_raw = file_info_raw.split('/')[-1]
 
@@ -52,13 +94,32 @@ class DataXXX:
     def check_file_type(self, allowed_file_extensions):
         allowed_file_extensions = [fe.lower() for fe in allowed_file_extensions]
         if self.file_extension.lower() not in allowed_file_extensions:
-            raise RuntimeError('Given file extension does not much the allowed extensions: '
-                               + str(allowed_file_extensions))
+            raise ValueError('Given file extension does not much the allowed extensions: '
+                             + str(allowed_file_extensions))
+
+    # @classmethod
+    # def load_with_qdlf_manager(cls, filename):
+    #     filename = filename
+    #     return cls(filename)
+
+    def get_qdlf_manager(self):
+        from .filing.QDLFiling import QDLFDataManager
+        additional_info = self.get_additional_info()
+        filename_info = self.file_info
+        labels = self.labels
+        all_info = {'additional info': dict(additional_info), 'filename info': dict(filename_info),
+                    'labels': dict(labels)}
+
+        return QDLFDataManager(data=self.data, parameters=all_info, datatype=self.qdlf_datatype)
+
+    def save_with_qdlf_data_manager(self, filename=''):
+        if filename == '':
+            filename = self.folder_name + '/' + '.'.join(self.file_name.split('.')[:-1])
+        qdlf_mng = self.get_qdlf_manager()
+        qdlf_mng.save(filename)
 
 
-class DataSIF(DataXXX):
-
-    allowed_file_extensions = ['sif']
+class DataSpectrum(DataXXX):
     allowed_units = {'Length': unit_families['Length'], 'Energy': unit_families['Energy'],
                      'Time': unit_families['Time']}
     default_keys = ['x_pixel', 'x_nm', 'x_eV',
@@ -74,64 +135,52 @@ class DataSIF(DataXXX):
         self.from_video = from_video
         self.second_order = second_order
 
-        # For some reason this doesn't work. it has to do with where super() is called in Dict26, but it is a mystery
-        # self.infoSIF = DataDictSIF(data={'wavelength_offset_nm': wavelength_offset,
-        #                                  'background_per_cycle': background_per_cycle})
-        self.infoSIF = DataDictSIF()
-        self.infoSIF['wavelength_offset_nm'] = wavelength_offset
-        self.infoSIF['background_counts_per_cycle'] = background_per_cycle
+        self.infoSpectrum = DataDictSpectrum()
+        self.infoSpectrum['wavelength_offset_nm'] = wavelength_offset
+        self.infoSpectrum['background_counts_per_cycle'] = background_per_cycle
 
         super().__init__(file_name, folder_name,
-                         self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer)
+                         self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
+                         self.qdlf_datatype)
 
+    def __post_init__(self):
         self.set_background()
         self.set_all_y_data()
         self.set_all_x_data()
         self.total_counts = self.integrate_counts()  # background is taken into account
 
-    def get_data(self):
-        counts_info, acquisition_info = readsif(self.folder_name + '/' + self.file_name)
-        counts_extended_list = counts_info.tolist()
-        y_counts = counts_extended_list[0][0]
-        self.data['y_counts'] = y_counts
+    def get_additional_info(self):
+        return {'infoSpectrum': dict(self.infoSpectrum), 'from_video': self.from_video, 'second_order': self.second_order,
+                'total_counts': self.total_counts}
 
-        x_pixel = np.array([pixel for pixel in range(1, len(y_counts)+1, 1)])
-        self.data['x_pixel'] = x_pixel
-
-        self.infoSIF['cal_data'] = acquisition_info['Calibration_data']
-        self.infoSIF['exposure_time_secs'] = acquisition_info['ExposureTime']
-        if not self.from_video:
-            self.infoSIF['cycles'] = acquisition_info['AccumulatedCycles']
-        else:
-            self.infoSIF['cycles'] = 1
-
-        self.labels['x_pixel'] = 'Pixel'
-        self.labels['y_counts'] = 'Counts'
-
-        return True
+    def set_additional_info(self, info_dictionary):
+        self.infoSpectrum = DataDictSIF(**info_dictionary['infoSpectrum'])
+        self.from_video = info_dictionary['from_video']
+        self.second_order = info_dictionary['second_order']
+        self.total_counts = info_dictionary['total_counts']
 
     def get_wavelength_calibration(self):
-        return self.infoSIF['cal_data'][0] \
-               + self.infoSIF['cal_data'][1] * self.data.x_pixel \
-               + self.infoSIF['cal_data'][2] * self.data.x_pixel ** 2 \
-               + self.infoSIF['cal_data'][3] * self.data.x_pixel ** 3 \
-               + self.infoSIF['wavelength_offset_nm']
+        return self.infoSpectrum['cal_data'][0] \
+               + self.infoSpectrum['cal_data'][1] * self.data.x_pixel \
+               + self.infoSpectrum['cal_data'][2] * self.data.x_pixel ** 2 \
+               + self.infoSpectrum['cal_data'][3] * self.data.x_pixel ** 3 \
+               + self.infoSpectrum['wavelength_offset_nm']
 
     def integrate_counts(self, unit='counts', subtract_bg=False):
         tot = self.data['y_{0}'.format(unit)].sum()
         if subtract_bg:
-            tot -= len(self.data)*self.infoSIF['background_{0}'.format(unit)]
+            tot -= len(self.data) * self.infoSpectrum['background_{0}'.format(unit)]
         return tot
 
     def integrate_in_region(self, start, end, unit_x='pixel', unit_y='counts', subtract_bg=False):
         data_in_region = self.data.loc[(self.data['x_{0}'.format(unit_x)] >= start)
                                        & (self.data['x_{0}'.format(unit_x)] <= end)]
         if subtract_bg:
-            data_in_region -= self.infoSIF['background_{0}'.format(unit_y)]
+            data_in_region -= self.infoSpectrum['background_{0}'.format(unit_y)]
         return data_in_region['y_{0}'.format(unit_y)].sum()
 
-    def shift_counts(self, shift_y, unit='counts'):
-        self.data['y_{0}'.format(unit)] += shift_y
+    def shift_counts(self, shift_y, unit='counts', new_end_string='_shifted'):
+        self.data['y_{0}{1}'.format(unit, new_end_string)] = self.data['y_{0}'.format(unit)] + shift_y
         return True
 
     def renormalize_counts(self, times_renorm_value, unit='counts',
@@ -140,14 +189,14 @@ class DataSIF(DataXXX):
         if added_string_to_label is None:
             added_string_to_label = get_added_label_from_unit(added_string_to_unit)
 
-        self.data['y_{0}'.format(unit+added_string_to_unit)] = self.data['y_{0}'.format(unit)] * times_renorm_value
+        self.data['y_{0}'.format(unit + added_string_to_unit)] = self.data['y_{0}'.format(unit)] * times_renorm_value
         self.labels['y_{0}'.format(unit + added_string_to_unit)] = self.labels['y_{0}'.format(unit)] \
                                                                    + added_string_to_label
         return True
 
     def renormalize_counts_to_max(self, unit='counts', added_string_to_unit='_renormalized_to_max',
                                   added_string_to_label='Renormalized to max'):
-        factor = 1./self.data['y_{0}'.format(unit)].max()
+        factor = 1. / self.data['y_{0}'.format(unit)].max()
         self.renormalize_counts(factor, unit, added_string_to_unit, added_string_to_label)
 
         return True
@@ -158,17 +207,17 @@ class DataSIF(DataXXX):
         return True
 
     def set_x_data_in_nm_2nd_order(self):
-        self.data['x_nm'] = self.get_wavelength_calibration()/2.
+        self.data['x_nm'] = self.get_wavelength_calibration() / 2.
         self.labels['x_nm'] = 'Wavelength (nm)'
         return True
 
     def set_x_data_in_ev(self):
-        self.data['x_eV'] = conversion_factor_nm_to_ev/ self.get_wavelength_calibration()
+        self.data['x_eV'] = conversion_factor_nm_to_ev / self.get_wavelength_calibration()
         self.labels['x_eV'] = 'Photon Energy (eV)'
         return True
 
     def set_x_data_in_ev_2nd_order(self):
-        self.data['x_eV'] = conversion_factor_nm_to_ev/(self.get_wavelength_calibration()/2.)
+        self.data['x_eV'] = conversion_factor_nm_to_ev / (self.get_wavelength_calibration() / 2.)
         self.labels['x_eV'] = 'Photon Energy (eV)'
         return True
 
@@ -181,29 +230,30 @@ class DataSIF(DataXXX):
             self.set_x_data_in_ev()
 
     def set_background(self):
-        self.infoSIF['background_counts_per_second'] = self.infoSIF['background_counts_per_cycle'] / \
-                                                       self.infoSIF['exposure_time_secs']
+        self.infoSpectrum['background_counts_per_second'] = self.infoSpectrum['background_counts_per_cycle'] / \
+                                                       self.infoSpectrum['exposure_time_secs']
 
-        self.infoSIF['background_counts'] = self.infoSIF['background_counts_per_cycle'] * self.infoSIF['cycles']
+        self.infoSpectrum['background_counts'] = self.infoSpectrum['background_counts_per_cycle'] * \
+                                                 self.infoSpectrum['cycles']
 
         power = self.file_info['Lsr: Power (nW)']
         try:
-            self.infoSIF['background_counts_per_second_per_power'] = self.infoSIF['background_counts_per_second'] / \
-                                                                     power
+            self.infoSpectrum['background_counts_per_second_per_power'] = self.infoSpectrum['background_counts'
+                                                                                            '_per_second'] / power
         except (ValueError, TypeError):
             warnings.warn('No power information found in file_info. Y data per power were not calculated.')
 
         return True
 
     def set_y_data_counts_per_second(self):
-        self.data['y_counts_per_second'] = self.data.y_counts/self.infoSIF['exposure_time_secs'] / \
-                                           self.infoSIF['cycles']
+        self.data['y_counts_per_second'] = self.data.y_counts / self.infoSpectrum['exposure_time_secs'] / \
+                                           self.infoSpectrum['cycles']
 
         self.labels['y_counts_per_second'] = 'Counts/sec'
         return True
 
     def set_y_data_counts_per_cycle(self):
-        self.data['y_counts_per_cycle'] = self.data.y_counts/self.infoSIF['cycles']
+        self.data['y_counts_per_cycle'] = self.data.y_counts / self.infoSpectrum['cycles']
 
         self.labels['y_counts_per_cycle'] = 'Counts/cycle'
         return True
@@ -218,14 +268,14 @@ class DataSIF(DataXXX):
 
     def set_y_data_nobg_counts_per_second(self):
         self.data['y_nobg_counts_per_second'] = self.data['y_counts_per_second'] \
-                                                - self.infoSIF['background_counts_per_second']
+                                                - self.infoSpectrum['background_counts_per_second']
 
         self.labels['y_nobg_counts_per_second'] = 'Counts/sec'
         return True
 
     def set_y_data_nobg_counts_per_cycle(self):
         self.data['y_nobg_counts_per_cycle'] = self.data['y_counts_per_cycle'] \
-                                                - self.infoSIF['background_counts_per_cycle']
+                                               - self.infoSpectrum['background_counts_per_cycle']
 
         self.labels['y_nobg_counts_per_cycle'] = 'Counts/cycle'
         return True
@@ -233,7 +283,8 @@ class DataSIF(DataXXX):
     def set_y_data_nobg_counts_per_second_per_power(self):
         try:
             self.data['y_nobg_counts_per_second_per_power'] = self.data['y_counts_per_second_per_power'] \
-                                                              - self.infoSIF['background_counts_per_second_per_power']
+                                                              - self.infoSpectrum['background_counts_per'
+                                                                                  '_second_per_power']
             return True
         except KeyError:
             return False
@@ -250,82 +301,230 @@ class DataSIF(DataXXX):
         return True
 
 
+class DataSIF(DataSpectrum):
+    allowed_file_extensions = ['sif', 'qdlf']
+    qdlf_datatype = 'sif'
+
+    def __init__(self, file_name, second_order=False, wavelength_offset=0, background_per_cycle=300,
+                 folder_name='.', from_video=True):
+
+        super().__init__(file_name, second_order, wavelength_offset, background_per_cycle, folder_name, from_video)
+
+        # used in case people have used it in the past
+        self.infoSIF = self.infoSpectrum
+
+    def get_data(self):
+        counts_info, acquisition_info = readsif(self.folder_name + '/' + self.file_name)
+        counts_extended_list = counts_info.tolist()
+        y_counts = counts_extended_list[0][0]
+        self.data['y_counts'] = y_counts
+
+        x_pixel = np.array([pixel for pixel in range(1, len(y_counts) + 1, 1)])
+        self.data['x_pixel'] = x_pixel
+
+        self.infoSpectrum['cal_data'] = acquisition_info['Calibration_data']
+        self.infoSpectrum['exposure_time_secs'] = acquisition_info['ExposureTime']
+        if not self.from_video:
+            self.infoSpectrum['cycles'] = acquisition_info['AccumulatedCycles']
+        else:
+            self.infoSpectrum['cycles'] = 1
+
+        self.labels['x_pixel'] = 'Pixel'
+        self.labels['y_counts'] = 'Counts'
+
+        return True
+
+
 class DataOP(DataXXX):
 
-    allowed_file_extensions = ['csv']
+    # https://core.ac.uk/download/pdf/82106638.pdf to add fitting functions with irregular binning.
+    allowed_file_extensions = ['csv', 'qdlf', 'json']
     allowed_units = {'Time': unit_families['Time']}
     default_keys = ['x_time_us', 'y_counts', 'y_counts_per_cycle', 'y_normalized_counts']
     spacer = '_'
+    qdlf_datatype = 'op'
 
     def __init__(self, file_name, folder_name='.'):
 
         self.infoOP = DataDictOP()
         self.size = -1
+        self.simple_fit = None
+        self.time_step = None
 
         super().__init__(file_name, folder_name,
-                         self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer)
+                         self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
+                         self.qdlf_datatype)
 
+    def __post_init__(self):
         self.y_data_in_counts_per_cycle()
         self.y_data_in_normalized_on_peak_counts()
+        self.y_data_in_counts_per_cycle_per_time_step()
+        try:
+            self.get_simple_fit(units_y='counts')
+            self.get_simple_fit(units_y='counts_per_cycle')
+            self.get_simple_fit(units_y='normalized_counts')
+            self.get_simple_fit(units_y='counts_per_cycle_per_time_step')
+        except:
+            warnings.warn('Fit was not possible')
 
     def get_data(self):
 
-        file = open(self.folder_name + '/' + self.file_name)
-        csv_reader = csv.reader(file)
-
-        self.size = sum(1 for line in csv_reader) - 2
-        if self.size < 3:
-            self.size = -2  # means there is no data, only run values
-            return False
-
-        file.seek(0)
-        x_time = [-9999]*self.size  # initialization
-        y_counts = [-1]*self.size  # initialization
-        # getting time and counts
-        for i in range(self.size):
-            line = next(csv_reader)
-            x_time[i] = float(line[0])
-            y_counts[i] = float(line[1])
-
-        self.data['x_time_us'] = x_time
-        self.data['y_counts'] = y_counts
         self.labels['x_time_us'] = 'Time (us)'
         self.labels['y_counts'] = 'Counts (Arb. Units)'
+        file_name = self.folder_name + '/' + self.file_name
+        from .filing.QDLFiling import QDLFDataManager
+        file = QDLFDataManager.load(file_name)
+        if file.datatype == 'op':
+            self.size = len(file.data['x1'])
+            self.time_step = file.data['x1'][1] - file.data['x1'][0]
 
-        # getting rest info
-        line = next(csv_reader)
-        self.infoOP['numRun'] = float(line[0])
-        self.infoOP['numPerRun'] = float(line[1])
+            self.data['x_time_us'] = file.data['x1']
+            self.data['y_counts'] = file.data['y1']
 
-        line = next(csv_reader)
-        self.infoOP['pumpOnTime_us'] = float(line[0])
-        self.infoOP['pumpOffTime_us'] = float(line[1])
+            # getting rest info
+            self.infoOP['numRun'] = file.parameters['Measurement Cycle Number']
+            self.infoOP['numPerRun'] = 1
 
-        if x_time[-1]-x_time[-2] != x_time[-2]-x_time[-3]:
-            warnings.warn('This file might be a T1 file')
+            self.infoOP['pumpOnTime_us'] = file.parameters['AOM/Pump on time'].us
+            self.infoOP['pumpOffTime_us'] = file.parameters['AOM/Pump off time'].us
+            return True
+        elif file.datatype is None:
+            # This is the old method we collected data (through Labview)
+            self.size = len(file.data[0]) - 2
+            if self.size < 1:
+                self.size = -2  # means there is no data, only run values
+                return False
+            self.time_step = file.data[0][1] - file.data[0][0]
 
-        file.close()
-        return True
+            self.data['x_time_us'] = file.data[0][:-2]
+            self.data['y_counts'] = file.data[1][:-2]
+
+            # getting rest info
+            self.infoOP['numRun'] = file.data[0][-2]
+            self.infoOP['numPerRun'] = file.data[1][-2]
+
+            self.infoOP['pumpOnTime_us'] = file.data[0][-1]
+            self.infoOP['pumpOffTime_us'] = file.data[1][-1]
+
+            if file.data[0][-1] - file.data[0][-2] != \
+                    file.data[0][-2] - file.data[0][-3]:
+                warnings.warn('This file might be a T1 file')
+            return True
+        else:
+            return False
+
+    def get_additional_info(self):
+        return {'infoOP': dict(self.infoOP), 'size': self.size, 'simple_fit': self.simple_fit,
+                'time_step': self.time_step}
+
+    def set_additional_info(self, info_dictionary):
+        self.infoOP = DataDictOP(**info_dictionary['infoOP'])
+        self.size = info_dictionary['size']
+        self.simple_fit = info_dictionary['simple_fit']
+        self.time_step = info_dictionary['time_step']
 
     def y_data_in_counts_per_cycle(self):
-        rescaling_factor_cycle = (self.infoOP['numRun']*self.infoOP['numPerRun'])  # per cycle
-        self.data['y_counts_per_cycle'] = [counts/rescaling_factor_cycle for counts in self.data.y_counts]
+        rescaling_factor_cycle = (self.infoOP['numRun'] * self.infoOP['numPerRun'])  # per cycle
+        self.data['y_counts_per_cycle'] = [counts / rescaling_factor_cycle for counts in self.data.y_counts]
         self.labels['y_counts_per_cycle'] = 'Counts/cycle'
         return True
 
     def y_data_in_normalized_on_peak_counts(self):
         rescaling_factor_normalize = self.data.y_counts.max()  # normalized
-        self.data['y_normalized_counts'] = [counts/rescaling_factor_normalize for counts in self.data.y_counts]
+        self.data['y_normalized_counts'] = [counts / rescaling_factor_normalize for counts in self.data.y_counts]
         self.labels['y_normalized_counts'] = 'Counts normalized to max'
         return True
 
+    def y_data_in_counts_per_cycle_per_time_step(self):
+        rescaling_factor_cycle = (self.infoOP['numRun'] * self.infoOP['numPerRun'])  # per cycle
+        self.data['y_counts_per_cycle_per_time_step'] = [counts / rescaling_factor_cycle / self.time_step for counts in self.data.y_counts]
+        self.labels['y_counts_per_cycle_per_time_step'] = 'Counts/cycle/time_step'
+        return True
+
+    def get_signal_start_end_indices(self):
+        start = int(self.size/3) + 1
+        end = 2*int(self.size/3) + 2
+        return start, end
+
+    def integrate_in_region(self, start, end, unit_x='time_us', unit_y='counts'):
+        data_in_region = self.data.loc[(self.data['x_{0}'.format(unit_x)] >= start)
+                                       & (self.data['x_{0}'.format(unit_x)] <= end)]
+        return data_in_region['y_{0}'.format(unit_y)].sum()
+
+    def average_in_region(self, start, end, unit_x='time_us', unit_y='counts'):
+        data_in_region = self.data.loc[(self.data['x_{0}'.format(unit_x)] >= start)
+                                       & (self.data['x_{0}'.format(unit_x)] <= end)]
+        return data_in_region['y_{0}'.format(unit_y)].mean()
+
+    def get_index_range_in_time_region(self, start, end, unit_x='time_us'):
+        return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] < end)
+
+    def get_single_index_in_time(self, value, unit_x='time_us'):
+        return (self.data['x_{0}'.format(unit_x)] >= value - self.time_step/2) & (self.data['x_{0}'.format(unit_x)] <=
+                                                                                  value + self.time_step)
+
+    @staticmethod
+    def simple_fit_function(x, bg, ampl, b, x0):
+        return ampl * np.exp(-b * (x - x0)) + bg
+
+    def get_simple_fit(self, units_y='counts'):
+        from scipy.optimize import curve_fit
+        units_y = 'y_{0}'.format(units_y)
+
+        def estimate_p0(x, y, initial_counts_last_index=3, steady_state_first_index=None,
+                        decay_estimation_final_index=None):
+            if steady_state_first_index is None:
+                steady_state_first_index = int(5 * len(y) / 6)
+            if decay_estimation_final_index is None:
+                decay_estimation_final_index = int(len(y) / 6)
+
+            init_counts = np.mean(y[:initial_counts_last_index])
+            steady_state_counts = np.mean(y[steady_state_first_index:])
+            amp = init_counts - steady_state_counts
+            bg = steady_state_counts
+            x0 = list(x)[0]
+
+            reduced_y = y[1:decay_estimation_final_index] - bg
+            # ignoring the negatives
+            reduced_y = np.where(reduced_y <= 0, np.nan, reduced_y)
+
+            b_estimations = -(np.log(reduced_y) - np.log(amp)) / (x[1:decay_estimation_final_index] - x0)
+
+            # ignore nans
+            b_estimations = np.ma.array(b_estimations, mask=np.isnan(b_estimations))
+            b = np.mean(b_estimations)
+            return [bg, amp, b, x0]
+
+        start = self.infoOP['pumpOnTime_us']
+        end = 2 * self.infoOP['pumpOnTime_us']
+        x = self.data['x_time_us'][self.get_index_range_in_time_region(start, end)]
+        y = self.data[units_y][self.get_index_range_in_time_region(start, end)]
+        estimated_p0 = estimate_p0(x, y)
+        x0 = float(list(x)[0])
+        popt, pcov = curve_fit(lambda x, bg, ampl, decay: self.simple_fit_function(x, bg, ampl, decay, x0),
+                               xdata=np.array(x, dtype=np.float64), ydata=np.array(y, dtype=np.float64),
+                               p0=estimated_p0[:-1])
+
+        popt = [*popt, x0]
+        pcov = np.vstack((np.array(pcov), np.array([0, 0, 0])))
+        pcov = np.hstack((pcov, np.array([[0], [0], [0], [0]])))
+        perr = np.sqrt(np.diag(pcov))
+
+        simple_fit = {'popt': popt, 'pcov': pcov, 'perr': perr, 'function': 'simple_fit_function'}
+
+        if self.simple_fit is None:
+            self.simple_fit = dict()
+        self.simple_fit[units_y] = simple_fit
+
+        return simple_fit
+
 
 class DataT1(DataXXX):
-
     allowed_file_extensions = ['csv']
     allowed_units = {'Time': unit_families['Time']}
     default_keys = ['x_time_us', 'y_counts', 'y_counts_per_cycle', 'y_normalized_counts']
     spacer = '_'
+    qdlf_datatype = 't1'
 
     def __init__(self, file_name, folder_name='.'):
 
@@ -335,6 +534,7 @@ class DataT1(DataXXX):
         super().__init__(file_name, folder_name,
                          self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer)
 
+    def __post_init__(self):
         self.y_data_in_counts_per_cycle()
         self.y_data_in_normalized_on_peak_counts()
 
@@ -375,20 +575,122 @@ class DataT1(DataXXX):
         self.infoT1['numPerRun'] = float(line[0])
         self.infoT1['clockRes_us'] = float(line[1])
 
-        if self.infoT1['numRun']-x_time[-1] == x_time[-1]-x_time[-2]:
+        if self.infoT1['numRun'] - x_time[-1] == x_time[-1] - x_time[-2]:
             warnings.warn('This file might be a OP file')
 
         file.close()
         return True
 
+    def get_additional_info(self):
+        return {'infoT1': dict(self.infoT1), 'size': self.size}
+
+    def set_additional_info(self, info_dictionary):
+        self.infoT1 = DataDictT1(**info_dictionary['infoT1'])
+        self.size = info_dictionary['size']
+
     def y_data_in_counts_per_cycle(self):
-        rescaling_factor_cycle = (self.infoT1['numRun']*self.infoT1['numPerRun'])  # per cycle
-        self.data['y_counts_per_cycle'] = [counts/rescaling_factor_cycle for counts in self.data.y_counts]
+        rescaling_factor_cycle = (self.infoT1['numRun'] * self.infoT1['numPerRun'])  # per cycle
+        self.data['y_counts_per_cycle'] = [counts / rescaling_factor_cycle for counts in self.data.y_counts]
         self.labels['y_counts_per_cycle'] = 'Counts/cycle'
         return True
 
     def y_data_in_normalized_on_peak_counts(self):
         rescaling_factor_normalize = self.data.y_counts.max()  # normalized
-        self.data['y_normalized_counts'] = [counts/rescaling_factor_normalize for counts in self.data.y_counts]
+        self.data['y_normalized_counts'] = [counts / rescaling_factor_normalize for counts in self.data.y_counts]
         self.labels['y_normalized_counts'] = 'Counts normalized to max'
+        return True
+
+
+# Added by Chris Zimmerman
+class DataRFSpectrum(DataXXX):
+    allowed_file_extensions = ['mat']
+    allowed_units = {'Frequency': unit_families['Frequency']}
+    default_keys = ['x_MHz', 'y_power_ratio_dB', 'y_power_ratio', 'y_voltage_ratio']
+    spacer = '_'
+    qdlf_datatype = 'rfspectrum'
+
+    def __init__(self, file_name, folder_name='./'):
+        super().__init__(file_name, folder_name,
+                         self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
+                         self.qdlf_datatype)
+
+        self.resonance_fit = None
+        self.quality_factor = None
+
+    def get_data(self):
+        data = spio.loadmat(self.folder_name + self.file_name)
+        self.data['x_MHz'] = data['freqsweep'][0]
+        self.data['y_power_ratio_dB'] = data['powerread'][0]
+        self.data['y_power_ratio'] = 10 ** (self.data['y_power_ratio_dB'] / 10)
+        self.data['y_voltage_ratio'] = np.sqrt(self.data['y_power_ratio'])
+
+        return True
+
+    def get_additional_info(self):
+        return {'resonance_fit': self.resonance_fit, 'quality_factor': self.quality_factor}
+
+    def set_additional_info(self, info_dictionary):
+        self.resonance_fit = info_dictionary['resonance_fit']
+        self.quality_factor = info_dictionary['quality_factor']
+
+    def calculate_quality_factor(self, initial_width=1):
+        def lorentzian(x, amplitude, position, width, offset):
+            return amplitude * (width ** 2 / ((x - position) ** 2 + width ** 2)) + offset
+
+        def get_full_width_at_half_maximum(resonance_fit):
+            data = resonance_fit.copy()
+
+            data['y_power_ratio'] -= data['y_power_ratio'].max()
+            data['y_power_ratio'] = np.abs(data['y_power_ratio'])
+            data['delta_y_power_ratio'] = np.abs(data['y_power_ratio'] - data['y_power_ratio'].max() / 2)
+            peak_position = data.loc[data['y_power_ratio'] == data['y_power_ratio'].max()].x_MHz.to_numpy()[0]
+
+            data_left = data.loc[data['x_MHz'] <= peak_position]
+            data_right = data.loc[data['x_MHz'] >= peak_position]
+
+            fwhm = (data.loc[data_right['delta_y_power_ratio'].idxmin(), 'x_MHz']
+                    - data.loc[data_left['delta_y_power_ratio'].idxmin(), 'x_MHz'])
+            return fwhm
+
+        initial_offset = self.data['y_power_ratio_dB'].max()
+        initial_amplitude = self.data['y_power_ratio_dB'].min()
+        initial_position = self.data.loc[self.data['y_power_ratio_dB'] == initial_amplitude].x_MHz.to_numpy()[0]
+
+        p0 = [initial_amplitude, initial_position, initial_width, initial_offset]
+        data_for_fitting = self.data.loc[(self.data['x_MHz'] >= initial_position - initial_width)
+                                         & (self.data['x_MHz'] <= initial_position + initial_width)]
+        parameters, covariance = spo.curve_fit(lorentzian, data_for_fitting['x_MHz'],
+                                               data_for_fitting['y_power_ratio_dB'], p0=p0)
+
+        self.resonance_fit = pd.DataFrame(data={'x_MHz': self.data['x_MHz'],
+                                                'y_power_ratio_dB': lorentzian(self.data['x_MHz'], parameters[0],
+                                                                               parameters[1], parameters[2],
+                                                                               parameters[3])})
+        self.resonance_fit['y_power_ratio'] = 10 ** (self.resonance_fit['y_power_ratio_dB'] / 10)
+
+        peak_pos = parameters[1]
+        fwhm = get_full_width_at_half_maximum(self.resonance_fit)
+        self.quality_factor = peak_pos / fwhm
+
+        return True
+
+
+# Added by Chris Zimmerman
+class DataSPCMCounter(DataXXX):
+    allowed_file_extensions = ['mat']
+    allowed_units = {'Time': unit_families['Time']}
+    default_keys = ['time', 'counts_per_second']
+    spacer = '_'
+    qdlf_datatype = 'spcmcounter'
+
+    def __init__(self, file_name, folder_name='./'):
+        super().__init__(file_name, folder_name,
+                         self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
+                         self.qdlf_datatype)
+
+    def get_data(self):
+        data = spio.loadmat(self.folder_name + self.file_name)
+        counts = np.transpose(data['data'][0][0][7][0][0])[0]
+        self.data = pd.DataFrame(data={'time': range(len(counts)), 'counts_per_second': counts[::-1]})
+
         return True

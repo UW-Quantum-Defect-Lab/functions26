@@ -5,26 +5,39 @@
 # Added/Edited by Chris on 2020-09-21
 
 import warnings
-from .DataXXX import DataSIF, DataOP, DataT1
+from typing import List, Union
+from .DataXXX import DataSIF, DataOP, DataT1, DataRFSpectrum, DataSPCMCounter
 from .DataDictXXX import DataDictFilenameInfo
 from .DataFrame26 import DataFrame26
 
 
 class DataMultiXXX:
 
-    def __init__(self, filename_list, folder_name):
+    def __init__(self, filename_list=None, folder_name='.', qdlf_datatype=None, load_from_qdlf=False):
+        if filename_list is None:
+            filename_list = []
         self.filename_list = filename_list
-        if not self.filename_list:
-            raise RuntimeError('Filename list is empty')
         self.size = len(self.filename_list)
         self.folder_name = folder_name
-        self.data_object_list = self.get_data_object_list()
+        self.qdlf_datatype = qdlf_datatype
 
-        self.multi_file_info = DataDictFilenameInfo()
-        self.multi_data = DataFrame26()
-        self.get_multi_file_info()
+        if not self.filename_list:
+            raise ValueError('Filename list is empty')
+        elif load_from_qdlf:
+            from .filing.QDLFiling import QDLFDataManager
+            # not ready yet
+            qdlf_mng = QDLFDataManager.load(filename=self.filename_list)
+        else:
+            self.data_object_list = self.get_data_object_list()
 
-    def get_data_object_list(self):
+            self.multi_file_info = DataDictFilenameInfo()
+            self.multi_data = DataFrame26(spacer=self.data_object_list[0].spacer)
+            self.get_multi_file_info()
+
+    def __iter__(self):
+        return iter(self.data_object_list)
+
+    def get_data_object_list(self) -> List[Union[DataSIF, DataOP, DataT1, DataRFSpectrum, DataSPCMCounter]]:
         warnings.warn('Define your own get_data_list() function')
         return []
 
@@ -55,6 +68,23 @@ class DataMultiXXX:
 
         return True
 
+    # @classmethod
+    # def load_with_qdlf_manager(cls, filename_list):
+    #     return cls(filename_list, load_from_qdlf=True)
+    #
+    # def get_qdlf_manager(self) -> QDLFDataManager:
+    #     additional_info = self.get_additional_info()
+    #     multi_filename_info = self.multi_file_info
+    #     all_info = {'additional info': dict(additional_info), 'filename info': dict(multi_filename_info)}
+    #
+    #     return QDLFDataManager(data=self.data, parameters=all_info, datatype=self.qdlf_datatype)
+    #
+    # def save_with_qdlf_manager(self, filename=''):
+    #     if filename == '':
+    #         filename = self.folder_name + '/' + self.file_name
+    #     qdlf_mng = self.get_qdlf_manager()
+    #     qdlf_mng.save(filename)
+
 
 class DataMultiSIF(DataMultiXXX):
 
@@ -66,7 +96,7 @@ class DataMultiSIF(DataMultiXXX):
         self.from_video = from_video
         super().__init__(file_name_list, folder_name)
 
-    def get_data_object_list(self):
+    def get_data_object_list(self) -> List[DataSIF]:
         data_object_list = []
         for file_name in self.filename_list:
             data_object_list.append(DataSIF(file_name=file_name,
@@ -88,7 +118,7 @@ class DataMultiSIF(DataMultiXXX):
         dictionary_keys = [label, 'PL']
         for variable in other_variables:
             if variable in self.multi_file_info:
-                dictionary_keys += other_variables
+                dictionary_keys += [variable]
 
         try:
             sorted_data_object_list = sorted(self.data_object_list,
@@ -109,7 +139,7 @@ class DataMultiSIF(DataMultiXXX):
                 integrated_pl[key].append(data_object.file_info[key])
 
         integrated_pl['DataSIF'] = sorted_data_object_list
-        integrated_pl_df = DataFrame26(data=integrated_pl)
+        integrated_pl_df = DataFrame26(qdlf_datatype='PLE', data=integrated_pl)
         return integrated_pl_df
 
 
@@ -119,7 +149,7 @@ class DataMultiOP(DataMultiXXX):
 
         super().__init__(file_name_list, folder_name)
 
-    def get_data_object_list(self):
+    def get_data_object_list(self) -> List[DataOP]:
         data_object_list = []
         for file_name in self.filename_list:
             data_object_list.append(DataOP(file_name=file_name, folder_name=self.folder_name))
@@ -133,9 +163,38 @@ class DataMultiT1(DataMultiXXX):
 
         super().__init__(file_name_list, folder_name)
 
-    def get_data_object_list(self):
+    def get_data_object_list(self) -> List[DataT1]:
         data_object_list = []
         for file_name in self.filename_list:
             data_object_list.append(DataT1(file_name=file_name, folder_name=self.folder_name))
 
         return data_object_list
+
+
+class DataMultiRFSpectrum(DataMultiXXX):
+
+    def __init__(self, file_name_list, folder_name='.'):
+
+        super().__init__(file_name_list, folder_name)
+
+    def get_data_object_list(self) -> List[DataRFSpectrum]:
+        data_object_list = []
+        for file_name in self.filename_list:
+            data_object_list.append(DataRFSpectrum(file_name=file_name, folder_name=self.folder_name))
+
+        return data_object_list
+
+
+class DataMultiSPCMCounter(DataMultiXXX):
+
+    def __init__(self, file_name_list, folder_name='.'):
+
+        super().__init__(file_name_list, folder_name)
+
+    def get_data_object_list(self) -> List[DataSPCMCounter]:
+        data_object_list = []
+        for file_name in self.filename_list:
+            data_object_list.append(DataSPCMCounter(file_name=file_name, folder_name=self.folder_name))
+
+        return data_object_list
+
