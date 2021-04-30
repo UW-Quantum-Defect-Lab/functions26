@@ -1,0 +1,1 @@
+https://github.com/fujiisoup/sif_reader/tarball/master#egg=package-1.0
