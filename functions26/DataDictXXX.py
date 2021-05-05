@@ -5,6 +5,7 @@
 
 # from dataclasses import dataclass, field
 import warnings
+
 from .Dict26 import Dict26
 from .units import unit_families
 from .units.UnitClass import UnitClass, UnitClassList
@@ -68,6 +69,15 @@ class DataDictSIF(Dict26):
 
 class DataDictOP(Dict26):
     default_keys = ['numRun', 'numPerRun', 'pumpOnTime_us', 'pumpOffTime_us']
+    allowed_units = {'Time': unit_families['Time']}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(default_keys=self.default_keys, allowed_units=self.allowed_units, spacer='_', *args, **kwargs)
+
+
+class DataDictOP2LaserDelay(Dict26):
+    default_keys = ['numRun', 'numPerRun', 'controlPumpOnTime_us', 'signalPumpOnTime_us', 'controlSignalDelayTime_us',
+                    'pumpOffTime_us']
     allowed_units = {'Time': unit_families['Time']}
 
     def __init__(self, *args, **kwargs):

@@ -2,8 +2,8 @@
 # This code was made for use in the Fu lab
 # by Christian Zimmermann
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import scipy.signal as sps
 from .useful_functions import calculate_weighted_mean
 
@@ -27,7 +27,7 @@ class Peaks:
                 self.data = data
             else:
                 raise KeyError('Columns of data must be x and y.')
-        elif isinstance(data, list) or isinstance(data, np.array):
+        elif isinstance(data, list) or isinstance(data, np.ndarray):
             self.data = pd.DataFrame(data={'x': data[0], 'y': data[1]})
         else:
             raise TypeError('data must be a 2D array/list or a dataframe with columns x and y.')

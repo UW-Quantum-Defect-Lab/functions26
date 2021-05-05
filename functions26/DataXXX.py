@@ -3,20 +3,23 @@
 # by Vasilis Niaouris
 # DataSIF modified by Christian Zimmermann
 
-from sif_reader import np_open as readsif
+
 import csv
 import numpy as np
-from .constants import conversion_factor_nm_to_ev  # eV*nm
-from .DataFrame26 import DataFrame26
-from .Dict26 import Dict26
-from .units import unit_families
-from .DataDictXXX import DataDictSpectrum, DataDictSIF, DataDictOP, DataDictT1
-from .DataDictXXX import DataDictFilenameInfo, DataDictLaserInfo, DataDictPathOpticsInfo
-from .useful_functions import get_added_label_from_unit
+import pandas as pd
 import scipy.optimize as spo
 import scipy.io as spio
-import pandas as pd
 import warnings
+
+from sif_reader import np_open as readsif
+from .constants import conversion_factor_nm_to_ev  # eV*nm
+from .constants import n_air
+from .DataDictXXX import DataDictSpectrum, DataDictSIF, DataDictOP, DataDictOP2LaserDelay, DataDictT1
+from .DataDictXXX import DataDictFilenameInfo
+from .DataFrame26 import DataFrame26
+from .Dict26 import Dict26
+from .useful_functions import get_added_label_from_unit
+from .units import unit_families
 
 
 class DataXXX:
@@ -31,6 +34,10 @@ class DataXXX:
         self.spacer = spacer
         self.qdlf_datatype = qdlf_datatype
 
+        if len(self.file_name.split('/')) > 1:
+            self.folder_name = '/'.join(self.file_name.split('/')[:-1])
+            self.file_name = self.file_name.split('/')[-1]
+
         self.data = DataFrame26(default_keys, allowed_units, spacer, qdlf_datatype=self.qdlf_datatype)
         self.labels = Dict26(default_keys, allowed_units, spacer)
 
@@ -42,7 +49,7 @@ class DataXXX:
         self.check_file_type(allowed_file_extensions)
         if self.file_extension == 'qdlf':
             from .filing.QDLFiling import QDLFDataManager
-            qdlf_mng = QDLFDataManager.load(filename=self.file_name)
+            qdlf_mng = QDLFDataManager.load(filename=self.folder_name + '/' + self.file_name)
             # check if this is a processed qdlf, or just a data file like the optical pumping qdlf files.
             if all([parameter in qdlf_mng.parameters for parameter in ['filename info', 'additional info', 'labels']]):
                 self.data = qdlf_mng.data
@@ -129,11 +136,12 @@ class DataSpectrum(DataXXX):
                     'y_nobg_counts_per_second', 'y_nobg_counts_per_second_per_power']
     spacer = '_'
 
-    def __init__(self, file_name, second_order=False, wavelength_offset=0, background_per_cycle=300,
-                 folder_name='.', from_video=True):
+    def __init__(self, file_name, second_order=False, wavelength_offset=0, refractive_index=n_air,
+                 background_per_cycle=300, folder_name='.', from_video=True):
 
         self.from_video = from_video
         self.second_order = second_order
+        self.refractive_index = refractive_index
 
         self.infoSpectrum = DataDictSpectrum()
         self.infoSpectrum['wavelength_offset_nm'] = wavelength_offset
@@ -150,7 +158,8 @@ class DataSpectrum(DataXXX):
         self.total_counts = self.integrate_counts()  # background is taken into account
 
     def get_additional_info(self):
-        return {'infoSpectrum': dict(self.infoSpectrum), 'from_video': self.from_video, 'second_order': self.second_order,
+        return {'infoSpectrum': dict(self.infoSpectrum), 'from_video': self.from_video,
+                'second_order': self.second_order,
                 'total_counts': self.total_counts}
 
     def set_additional_info(self, info_dictionary):
@@ -212,12 +221,12 @@ class DataSpectrum(DataXXX):
         return True
 
     def set_x_data_in_ev(self):
-        self.data['x_eV'] = conversion_factor_nm_to_ev / self.get_wavelength_calibration()
+        self.data['x_eV'] = conversion_factor_nm_to_ev/(self.get_wavelength_calibration()*self.refractive_index)
         self.labels['x_eV'] = 'Photon Energy (eV)'
         return True
 
     def set_x_data_in_ev_2nd_order(self):
-        self.data['x_eV'] = conversion_factor_nm_to_ev / (self.get_wavelength_calibration() / 2.)
+        self.data['x_eV'] = conversion_factor_nm_to_ev/(self.get_wavelength_calibration()*self.refractive_index/2.)
         self.labels['x_eV'] = 'Photon Energy (eV)'
         return True
 
@@ -231,7 +240,7 @@ class DataSpectrum(DataXXX):
 
     def set_background(self):
         self.infoSpectrum['background_counts_per_second'] = self.infoSpectrum['background_counts_per_cycle'] / \
-                                                       self.infoSpectrum['exposure_time_secs']
+                                                            self.infoSpectrum['exposure_time_secs']
 
         self.infoSpectrum['background_counts'] = self.infoSpectrum['background_counts_per_cycle'] * \
                                                  self.infoSpectrum['cycles']
@@ -305,10 +314,11 @@ class DataSIF(DataSpectrum):
     allowed_file_extensions = ['sif', 'qdlf']
     qdlf_datatype = 'sif'
 
-    def __init__(self, file_name, second_order=False, wavelength_offset=0, background_per_cycle=300,
-                 folder_name='.', from_video=True):
+    def __init__(self, file_name, second_order=False, wavelength_offset=0, refractive_index=n_air,
+                 background_per_cycle=300, folder_name='.', from_video=True):
 
-        super().__init__(file_name, second_order, wavelength_offset, background_per_cycle, folder_name, from_video)
+        super().__init__(file_name, second_order, wavelength_offset, refractive_index, background_per_cycle,
+                         folder_name, from_video)
 
         # used in case people have used it in the past
         self.infoSIF = self.infoSpectrum
@@ -336,7 +346,6 @@ class DataSIF(DataSpectrum):
 
 
 class DataOP(DataXXX):
-
     # https://core.ac.uk/download/pdf/82106638.pdf to add fitting functions with irregular binning.
     allowed_file_extensions = ['csv', 'qdlf', 'json']
     allowed_units = {'Time': unit_families['Time']}
@@ -344,28 +353,32 @@ class DataOP(DataXXX):
     spacer = '_'
     qdlf_datatype = 'op'
 
-    def __init__(self, file_name, folder_name='.'):
+    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True):
 
         self.infoOP = DataDictOP()
         self.size = -1
         self.simple_fit = None
         self.time_step = None
+        self.run_simple_fit_functions = run_simple_fit_functions
 
         super().__init__(file_name, folder_name,
                          self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
                          self.qdlf_datatype)
 
     def __post_init__(self):
-        self.y_data_in_counts_per_cycle()
         self.y_data_in_normalized_on_peak_counts()
-        self.y_data_in_counts_per_cycle_per_time_step()
-        try:
-            self.get_simple_fit(units_y='counts')
-            self.get_simple_fit(units_y='counts_per_cycle')
-            self.get_simple_fit(units_y='normalized_counts')
-            self.get_simple_fit(units_y='counts_per_cycle_per_time_step')
-        except:
-            warnings.warn('Fit was not possible')
+        if self.infoOP['numRun'] is not None:
+            self.y_data_in_counts_per_cycle()
+            self.y_data_in_counts_per_cycle_per_time_step()
+        if self.run_simple_fit_functions:
+            try:
+                self.get_simple_fit(units_y='counts')
+                self.get_simple_fit(units_y='normalized_counts')
+                if self.infoOP['numRun'] is not None:
+                    self.get_simple_fit(units_y='counts_per_cycle')
+                    self.get_simple_fit(units_y='counts_per_cycle_per_time_step')
+            except (ValueError, RuntimeError) as e:
+                warnings.warn('Fit was not possible: ' + e)
 
     def get_data(self):
 
@@ -415,13 +428,14 @@ class DataOP(DataXXX):
 
     def get_additional_info(self):
         return {'infoOP': dict(self.infoOP), 'size': self.size, 'simple_fit': self.simple_fit,
-                'time_step': self.time_step}
+                'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions}
 
     def set_additional_info(self, info_dictionary):
         self.infoOP = DataDictOP(**info_dictionary['infoOP'])
         self.size = info_dictionary['size']
         self.simple_fit = info_dictionary['simple_fit']
         self.time_step = info_dictionary['time_step']
+        self.run_simple_fit_functions = info_dictionary['run_simple_fit_functions']
 
     def y_data_in_counts_per_cycle(self):
         rescaling_factor_cycle = (self.infoOP['numRun'] * self.infoOP['numPerRun'])  # per cycle
@@ -437,13 +451,14 @@ class DataOP(DataXXX):
 
     def y_data_in_counts_per_cycle_per_time_step(self):
         rescaling_factor_cycle = (self.infoOP['numRun'] * self.infoOP['numPerRun'])  # per cycle
-        self.data['y_counts_per_cycle_per_time_step'] = [counts / rescaling_factor_cycle / self.time_step for counts in self.data.y_counts]
+        self.data['y_counts_per_cycle_per_time_step'] = [counts / rescaling_factor_cycle / self.time_step for counts in
+                                                         self.data.y_counts]
         self.labels['y_counts_per_cycle_per_time_step'] = 'Counts/cycle/time_step'
         return True
 
     def get_signal_start_end_indices(self):
-        start = int(self.size/3) + 1
-        end = 2*int(self.size/3) + 2
+        start = int(self.size / 3) + 1
+        end = 2 * int(self.size / 3) + 2
         return start, end
 
     def integrate_in_region(self, start, end, unit_x='time_us', unit_y='counts'):
@@ -460,8 +475,8 @@ class DataOP(DataXXX):
         return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] < end)
 
     def get_single_index_in_time(self, value, unit_x='time_us'):
-        return (self.data['x_{0}'.format(unit_x)] >= value - self.time_step/2) & (self.data['x_{0}'.format(unit_x)] <=
-                                                                                  value + self.time_step)
+        return (self.data['x_{0}'.format(unit_x)] >= value - self.time_step / 2) & (self.data['x_{0}'.format(unit_x)] <=
+                                                                                    value + self.time_step)
 
     @staticmethod
     def simple_fit_function(x, bg, ampl, b, x0):
@@ -483,6 +498,8 @@ class DataOP(DataXXX):
             amp = init_counts - steady_state_counts
             bg = steady_state_counts
             x0 = list(x)[0]
+            if amp < 0:
+                return [bg, 0, 0, x0]
 
             reduced_y = y[1:decay_estimation_final_index] - bg
             # ignoring the negatives
@@ -499,16 +516,268 @@ class DataOP(DataXXX):
         end = 2 * self.infoOP['pumpOnTime_us']
         x = self.data['x_time_us'][self.get_index_range_in_time_region(start, end)]
         y = self.data[units_y][self.get_index_range_in_time_region(start, end)]
+
+        # we can only do the fitting if there are enough data points
+        if len(y) < 5:
+            return None
+
         estimated_p0 = estimate_p0(x, y)
         x0 = float(list(x)[0])
-        popt, pcov = curve_fit(lambda x, bg, ampl, decay: self.simple_fit_function(x, bg, ampl, decay, x0),
-                               xdata=np.array(x, dtype=np.float64), ydata=np.array(y, dtype=np.float64),
-                               p0=estimated_p0[:-1])
 
-        popt = [*popt, x0]
-        pcov = np.vstack((np.array(pcov), np.array([0, 0, 0])))
-        pcov = np.hstack((pcov, np.array([[0], [0], [0], [0]])))
-        perr = np.sqrt(np.diag(pcov))
+        if estimated_p0[1] > 0:
+            popt, pcov = curve_fit(lambda x, bg, ampl, decay: self.simple_fit_function(x, bg, ampl, decay, x0),
+                                   xdata=np.array(x, dtype=np.float64), ydata=np.array(y, dtype=np.float64),
+                                   p0=estimated_p0[:-1])
+
+            popt = [*popt, x0]
+            pcov = np.vstack((np.array(pcov), np.array([0, 0, 0])))
+            pcov = np.hstack((pcov, np.array([[0], [0], [0], [0]])))
+            perr = np.sqrt(np.diag(pcov))
+        else:
+            popt, pcov = curve_fit(lambda x, bg: self.simple_fit_function(x, bg, 0, 0, x0),
+                                   xdata=np.array(x, dtype=np.float64), ydata=np.array(y, dtype=np.float64),
+                                   p0=estimated_p0[1])
+
+            popt = [popt[0], 0, 0, x0]
+            pcov_value = pcov[0][0]
+            pcov = np.zeros(shape=(4, 4))
+            pcov[0][0] = pcov_value
+            perr = np.sqrt(np.diag(pcov))
+
+        simple_fit = {'popt': popt, 'pcov': pcov, 'perr': perr, 'function': 'simple_fit_function'}
+
+        if self.simple_fit is None:
+            self.simple_fit = dict()
+        self.simple_fit[units_y] = simple_fit
+
+        return simple_fit
+
+
+class DataOP2LaserDelay(DataXXX):
+    allowed_file_extensions = ['csv', 'qdlf', 'json']
+    allowed_units = {'Time': unit_families['Time']}
+    default_keys = ['x_time_us', 'y_counts', 'y_counts_per_cycle', 'y_normalized_counts']
+    spacer = '_'
+    qdlf_datatype = 'op'
+
+    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True):
+
+        self.infoOP2LaserDelay = DataDictOP2LaserDelay()
+        self.size = -1
+        self.simple_fit = None
+        self.time_step = None
+        self.run_simple_fit_functions = run_simple_fit_functions
+
+        super().__init__(file_name, folder_name,
+                         self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
+                         self.qdlf_datatype)
+
+    def __post_init__(self):
+        self.y_data_in_normalized_on_peak_counts()
+        if self.infoOP2LaserDelay['numRun'] is not None:
+            self.y_data_in_counts_per_cycle()
+            self.y_data_in_counts_per_cycle_per_time_step()
+
+        self.set_control_data()
+        self.set_signal_data()
+        if self.run_simple_fit_functions:
+            try:
+                self.get_simple_fit(units_y='control_counts')
+                self.get_simple_fit(units_y='control_normalized_counts')
+
+                self.get_simple_fit(units_y='signal_counts')
+                self.get_simple_fit(units_y='signal_normalized_counts')
+
+                if self.infoOP2LaserDelay['numRun'] is not None:
+                    self.get_simple_fit(units_y='control_counts_per_cycle')
+                    self.get_simple_fit(units_y='control_counts_per_cycle_per_time_step')
+
+                    self.get_simple_fit(units_y='signal_counts_per_cycle')
+                    self.get_simple_fit(units_y='signal_counts_per_cycle_per_time_step')
+
+            except (ValueError, RuntimeError) as e:
+                warnings.warn('Fit was not possible: ' + e)
+
+    def get_data(self):
+
+        self.labels['x_time_us'] = 'Time (us)'
+        self.labels['y_counts'] = 'Counts (Arb. Units)'
+        file_name = self.folder_name + '/' + self.file_name
+        from functions26.filing.QDLFiling import QDLFDataManager
+        file = QDLFDataManager.load(file_name)
+        if file.datatype == 'op2laserdelay':
+            self.size = len(file.data['x1'])
+            self.time_step = file.data['x1'][1] - file.data['x1'][0]
+
+            self.data['x_time_us'] = file.data['x1']
+            self.data['y_counts'] = file.data['y1']
+
+            # getting rest info
+            self.infoOP2LaserDelay['numRun'] = file.parameters['Measurement Cycle Number']
+            self.infoOP2LaserDelay['numPerRun'] = 1
+
+            self.infoOP2LaserDelay['controlPumpOnTime_us'] = file.parameters['AOM/Control Pump on time'].us
+            self.infoOP2LaserDelay['signalPumpOnTime_us'] = file.parameters['AOM/Signal Pump on time'].us
+            self.infoOP2LaserDelay['controlSignalDelayTime_us'] = file.parameters['AOM/Control-Signal delay time'].us
+            self.infoOP2LaserDelay['pumpOffTime_us'] = file.parameters['AOM/Pump off time'].us
+
+            return True
+        else:
+            return False
+
+    def get_additional_info(self):
+        return {'infoOP2LaserDelay': dict(self.infoOP2LaserDelay), 'size': self.size, 'simple_fit': self.simple_fit,
+                'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions}
+
+    def set_additional_info(self, info_dictionary):
+        self.infoOP = DataDictOP2LaserDelay(**info_dictionary['infoOP2LaserDelay'])
+        self.size = info_dictionary['size']
+        self.simple_fit = info_dictionary['simple_fit']
+        self.time_step = info_dictionary['time_step']
+        self.run_simple_fit_functions = info_dictionary['run_simple_fit_functions']
+
+    def y_data_in_counts_per_cycle(self):
+        rescaling_factor_cycle = (self.infoOP2LaserDelay['numRun'] * self.infoOP2LaserDelay['numPerRun'])  # per cycle
+        self.data['y_counts_per_cycle'] = [counts / rescaling_factor_cycle for counts in self.data.y_counts]
+        self.labels['y_counts_per_cycle'] = 'Counts/cycle'
+        return True
+
+    def y_data_in_normalized_on_peak_counts(self):
+        rescaling_factor_normalize = self.data.y_counts.max()  # normalized
+        self.data['y_normalized_counts'] = [counts / rescaling_factor_normalize for counts in self.data.y_counts]
+        self.labels['y_normalized_counts'] = 'Counts normalized to max'
+        return True
+
+    def y_data_in_counts_per_cycle_per_time_step(self):
+        rescaling_factor_cycle = (self.infoOP2LaserDelay['numRun'] * self.infoOP2LaserDelay['numPerRun'])  # per cycle
+        self.data['y_counts_per_cycle_per_time_step'] = [counts / rescaling_factor_cycle / self.time_step for counts in
+                                                         self.data.y_counts]
+        self.labels['y_counts_per_cycle_per_time_step'] = 'Counts/cycle/time_step'
+        return True
+
+    def get_pump_off_length_on_data_edges(self):
+        total_measurement_length = int((self.infoOP2LaserDelay['controlPumpOnTime_us'] +
+                                        self.infoOP2LaserDelay['signalPumpOnTime_us'] +
+                                        self.infoOP2LaserDelay['controlSignalDelayTime_us']) / self.time_step)
+        return int((self.size - total_measurement_length) / 2)
+
+    def set_control_data(self):
+        start, end = self.get_control_start_end_indices()
+        self.data['x_control_time_us'] = self.data['x_time_us'][start:end]
+        self.data['y_control_counts'] = self.data['y_counts'][start:end]
+        self.data['y_control_normalized_counts'] = self.data['y_normalized_counts'][start:end]
+        if self.infoOP2LaserDelay['numRun'] is not None:
+            self.data['y_control_counts_per_cycle'] = self.data['y_counts_per_cycle'][start:end]
+            self.data['y_control_counts_per_cycle_per_time_step'] = self.data['y_counts_per_cycle_per_time_step'][start:
+                                                                                                                  end]
+
+    def set_signal_data(self):
+        start, end = self.get_signal_start_end_indices()
+        self.data['x_signal_time_us'] = self.data['x_time_us'][start:end]
+        self.data['y_signal_counts'] = self.data['y_counts'][start:end]
+        self.data['y_signal_normalized_counts'] = self.data['y_normalized_counts'][start:end]
+        if self.infoOP2LaserDelay['numRun'] is not None:
+            self.data['y_signal_counts_per_cycle'] = self.data['y_counts_per_cycle'][start:end]
+            self.data['y_signal_counts_per_cycle_per_time_step'] = self.data['y_counts_per_cycle_per_time_step'][start:
+                                                                                                                 end]
+
+    def get_control_start_end_indices(self):
+        start = self.get_pump_off_length_on_data_edges()
+        end = start + int(self.infoOP2LaserDelay['controlPumpOnTime_us'] / self.time_step) + 1
+        return start, end
+
+    def get_signal_start_end_indices(self):
+        end = self.size - self.get_pump_off_length_on_data_edges() + 1
+        start = end - int(self.infoOP2LaserDelay['signalPumpOnTime_us'] / self.time_step) - 1
+        return start, end
+
+    def integrate_in_region(self, start, end, unit_x='time_us', unit_y='counts'):
+        data_in_region = self.data.loc[(self.data['x_{0}'.format(unit_x)] >= start)
+                                       & (self.data['x_{0}'.format(unit_x)] <= end)]
+        return data_in_region['y_{0}'.format(unit_y)].sum()
+
+    def average_in_region(self, start, end, unit_x='time_us', unit_y='counts'):
+        data_in_region = self.data.loc[(self.data['x_{0}'.format(unit_x)] >= start)
+                                       & (self.data['x_{0}'.format(unit_x)] <= end)]
+        return data_in_region['y_{0}'.format(unit_y)].mean()
+
+    def get_index_range_in_time_region(self, start, end, unit_x='time_us'):
+        return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] < end)
+
+    def get_single_index_in_time(self, value, unit_x='time_us'):
+        return (self.data['x_{0}'.format(unit_x)] >= value - self.time_step / 2) & (self.data['x_{0}'.format(unit_x)] <=
+                                                                                    value + self.time_step)
+
+    @staticmethod
+    def simple_fit_function(x, bg, ampl, b, x0):
+        return ampl * np.exp(-b * (x - x0)) + bg
+
+    def get_simple_fit(self, units_y):
+        from scipy.optimize import curve_fit
+        units_y = 'y_{0}'.format(units_y)
+
+        def estimate_p0(x, y, initial_counts_last_index=3, steady_state_first_index=None,
+                        decay_estimation_final_index=None):
+            if steady_state_first_index is None:
+                steady_state_first_index = int(5 * len(y) / 6)
+            if decay_estimation_final_index is None:
+                decay_estimation_final_index = int(len(y) / 6)
+
+            init_counts = np.mean(y[:initial_counts_last_index])
+            steady_state_counts = np.mean(y[steady_state_first_index:])
+            amp = init_counts - steady_state_counts
+            bg = steady_state_counts
+            x0 = list(x)[0]
+            if amp < 0:
+                return [bg, 0, 0, x0]
+
+            reduced_y = y[1:decay_estimation_final_index] - bg
+            # ignoring the negatives
+            reduced_y = np.where(reduced_y <= 0, np.nan, reduced_y)
+
+            b_estimations = -(np.log(reduced_y) - np.log(amp)) / (x[1:decay_estimation_final_index] - x0)
+
+            # ignore nans
+            b_estimations = np.ma.array(b_estimations, mask=np.isnan(b_estimations))
+            b = np.mean(b_estimations)
+            return [bg, amp, b, x0]
+
+        if units_y.startswith('y_control'):
+            start, end = self.get_control_start_end_indices()
+            x = np.array(self.data['x_control_time_us'][start:end])
+        elif units_y.startswith('y_signal'):
+            start, end = self.get_signal_start_end_indices()
+            x = np.array(self.data['x_signal_time_us'][start:end])
+        else:
+            return None
+        y = np.array(self.data[units_y][start:end])
+
+        # we can only do the fitting if there are enough data points
+        if len(y) < 5:
+            return None
+
+        estimated_p0 = estimate_p0(x, y)
+        x0 = float(list(x)[0])
+
+        if estimated_p0[1] > 0:
+            popt, pcov = curve_fit(lambda x, bg, ampl, decay: self.simple_fit_function(x, bg, ampl, decay, x0),
+                                   xdata=np.array(x, dtype=np.float64), ydata=np.array(y, dtype=np.float64),
+                                   p0=estimated_p0[:-1])
+
+            popt = [*popt, x0]
+            pcov = np.vstack((np.array(pcov), np.array([0, 0, 0])))
+            pcov = np.hstack((pcov, np.array([[0], [0], [0], [0]])))
+            perr = np.sqrt(np.diag(pcov))
+        else:
+            popt, pcov = curve_fit(lambda x, bg: self.simple_fit_function(x, bg, 0, 0, x0),
+                                   xdata=np.array(x, dtype=np.float64), ydata=np.array(y, dtype=np.float64),
+                                   p0=estimated_p0[1])
+
+            popt = [popt[0], 0, 0, x0]
+            pcov_value = pcov[0][0]
+            pcov = np.zeros(shape=(4, 4))
+            pcov[0][0] = pcov_value
+            perr = np.sqrt(np.diag(pcov))
 
         simple_fit = {'popt': popt, 'pcov': pcov, 'perr': perr, 'function': 'simple_fit_function'}
 
@@ -604,7 +873,7 @@ class DataT1(DataXXX):
 # Added by Chris Zimmerman
 class DataRFSpectrum(DataXXX):
     allowed_file_extensions = ['mat']
-    allowed_units = {'Frequency': unit_families['Frequency']}
+    allowed_units = {'Frequency': unit_families['Frequency'], 'Power': unit_families['Power']}
     default_keys = ['x_MHz', 'y_power_ratio_dB', 'y_power_ratio', 'y_voltage_ratio']
     spacer = '_'
     qdlf_datatype = 'rfspectrum'

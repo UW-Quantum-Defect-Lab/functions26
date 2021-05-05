@@ -2,26 +2,25 @@
 # This code was made for use in the Fu lab
 # by Christian Zimmermann
 
-
-from .constants import conversion_factor_nm_to_ev  # eV*nm
-from .DataDictXXX import DataDictFilenameInfo
-from .DataFrame26 import DataFrame26
-from .Dict26 import Dict26
-from .units import unit_families
-from .useful_functions import get_added_label_from_unit
-from matplotlib.colors import LogNorm, Normalize
+import matplotlib as mpl
 import matplotlib.font_manager as fm
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import scipy.io as spio
-import warnings
 import scipy.optimize as spo
 import scipy.signal as sps
+import scipy.special as spsp
+import warnings
+
+from matplotlib.colors import LogNorm, Normalize
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+
+from .constants import conversion_factor_nm_to_ev  # eV*nm
+from .constants import n_air
+from .DataDictXXX import DataDictFilenameInfo
 
 
 def convert_to_string_to_float(number_string):
@@ -49,10 +48,33 @@ def convert_to_string_to_float(number_string):
 
     return number
 
+
+def convert_xy_to_position_string(position):
+    axes = ['x', 'y']
+    string = ''
+    for n, axis in enumerate(axes):
+        string += axis
+        if position[n] < 0:
+            position[n] = np.abs(position[n])
+            sign_string = 'n'
+        else:
+            sign_string = ''
+        string += sign_string
+        string += str(np.round(position[n], 3)).replace('.', 'p')
+        if n == 0:
+            string += '_'
+
+    return string
+
+
 def line(x, a, b):
     return a*x+b
+
+
 def exponential(x, a, b, x0):
     return a*np.exp(b*(x-x0))
+
+
 def guess_initial_parameters(x, y, function = 'linear'):
     index_min = x.idxmin()
     index_max = x.idxmax()
@@ -71,6 +93,27 @@ def guess_initial_parameters(x, y, function = 'linear'):
         p0 = [prefactor, exponent, shift]
 
     return p0
+
+
+def two_voigt_and_linear_baseline(x, slope, intersect, amplitude_1, width_gaussian_1, width_lorentzian_1, position_1, amplitude_2, width_gaussian_2, width_lorentzian_2, position_2):
+    return (line(x, slope, intersect)
+                + amplitude_1*spsp.voigt_profile(x - position_1, width_gaussian_1, width_lorentzian_1)
+                + amplitude_2*spsp.voigt_profile(x - position_2, width_gaussian_2, width_lorentzian_2))
+
+
+def guess_linear_fit(sub_spectrum, unit_spectral_range, number_of_points = 10):
+    sub_spectrum.reset_index(drop = True, inplace = True)
+    sub_spectrum_left = sub_spectrum.loc[0:number_of_points]
+    sub_spectrum_right = sub_spectrum.loc[len(sub_spectrum.index)-number_of_points+1:len(sub_spectrum.index)+1]
+    sub_spectrum_left.reset_index(drop = True, inplace = True)
+    sub_spectrum_right.reset_index(drop = True, inplace = True)
+    slope = (sub_spectrum_right['y_counts_per_seconds'][0] - sub_spectrum_left['y_counts_per_seconds'][0])/(sub_spectrum_right['x_{0}'.format(unit_spectral_range)][0] - sub_spectrum_left['x_{0}'.format(unit_spectral_range)][0])
+    intersect = sub_spectrum_left['y_counts_per_seconds'][0] - slope*sub_spectrum_left['x_{0}'.format(unit_spectral_range)][0]
+    sub_spectrum_edges = pd.concat([sub_spectrum_left, sub_spectrum_right], ignore_index = True)
+    params, covar = spo.curve_fit(line, sub_spectrum_edges['y_counts_per_seconds'], sub_spectrum_edges['x_{0}'.format(unit_spectral_range)], p0 = [slope, intersect])
+    slope = params[0]
+    intersect = params[1]
+    return slope, intersect
 
 
 class DataImage:
@@ -116,13 +159,21 @@ class DataImage:
 class DataConfocalScan(DataImage):
     allowed_file_extensions = ['mat']
 
-    def __init__(self, file_name, folder_name='.', spectral_range='all', unit_spectral_range=None, baseline = None, method = 'sum'):
+    def __init__(self, file_name, folder_name='.', spectral_range='all', unit_spectral_range=None, baseline=None,
+                 method='sum', background=300, wavelength_offset=0, new_wavelength_axis=None, second_order=True,
+                 refractive_index=n_air):
 
         self.spectral_range = spectral_range
         self.unit_spectral_range = unit_spectral_range
+        self.background = background
+        self.second_order = second_order
+        self.refractive_index = refractive_index
+        self.wavelength_offset = wavelength_offset
+        self.new_wavelength_axis = new_wavelength_axis
         self.method = method
         self.baseline = {}
-        if baseline != None:
+
+        if baseline is not None:
             if '_' in baseline:
                 baseline_keyword_components = baseline.split('_')
                 baseline_type = baseline_keyword_components[0]
@@ -147,28 +198,14 @@ class DataConfocalScan(DataImage):
         super().__init__(file_name, folder_name, self.allowed_file_extensions)
 
     def get_data(self):
-        def convert_xy_to_position_string(position):
-            axes = ['x', 'y']
-            string = ''
-            for n, axis in enumerate(axes):
-                string += axis
-                if position[n] < 0:
-                    position[n] = np.abs(position[n])
-                    sign_string = 'n'
-                else:
-                    sign_string = ''
-                string += sign_string
-                string += str(np.round(position[n], 3)).replace('.', 'p')
-                if n == 0:
-                    string += '_'
-
-            return string
 
         matlab_file_data = spio.loadmat(self.file_name)
 
         if 'scan' in matlab_file_data.keys():
             self.software = 'DoritoScopeConfocal'
             self.image_data = matlab_file_data['scan'][0][0][4]
+            self.exposure_time = matlab_file_data['scan'][0][0][11][0][0]
+            self.image_data = self.image_data/self.exposure_time
             # Convert image, so it looks like what we see in the matlab GUI
             self.image_data = np.transpose(self.image_data)
             self.image_data = np.flip(self.image_data, axis = 0)
@@ -209,10 +246,15 @@ class DataConfocalScan(DataImage):
                 self.spectra_raw = [[spectra_raw[ix][iy][0] for iy in range(len(self.y))] for ix in range(len(self.x))]
                 self.spectra_raw = np.transpose(self.spectra_raw, axes=[1, 0, 2])
                 self.spectra_raw = np.flip(self.spectra_raw, axis=0)
-                self.spectra_raw = self.spectra_raw
-                self.wavelength = matlab_file_data['scan'][0][0][16][0]
-                self.wavelength = self.wavelength / 2
-                self.photon_energy = conversion_factor_nm_to_ev / self.wavelength
+                self.spectra_raw = self.spectra_raw - self.background
+                self.spectra_raw = self.spectra_raw/self.exposure_time
+                if self.new_wavelength_axis is not None:
+                    self.wavelength = self.new_wavelength_axis + self.wavelength_offset
+                else:
+                    self.wavelength = matlab_file_data['scan'][0][0][16][0] + self.wavelength_offset
+                if self.second_order:
+                    self.wavelength = self.wavelength / 2
+                self.photon_energy = conversion_factor_nm_to_ev /(self.wavelength*self.refractive_index)
                 self.spectra = {}
                 for ix, x_position in enumerate(self.x):
                     for iy, y_position in enumerate(self.y):
@@ -222,6 +264,7 @@ class DataConfocalScan(DataImage):
                         self.spectra[position_string]['x_eV'] = self.photon_energy
 
                 self.image_data_from_spectra = []
+                self.sub_spectra = {}
                 for ix, x_position in enumerate(self.x):
                     counts_for_image_along_y = []
                     for iy, y_position in enumerate(self.y):
@@ -296,6 +339,7 @@ class DataConfocalScan(DataImage):
                             spectrum = spectrum.loc[
                                 (spectrum['x_{0}'.format(self.unit_spectral_range)] >= self.spectral_range[0]) & (
                                             spectrum['x_{0}'.format(self.unit_spectral_range)] <= self.spectral_range[1])]
+                            self.sub_spectra[position_string] = spectrum
 
                             if self.baseline['type'] != None and not set_pixel_to_zero:
                                 self.baseline[position_string]['x'] = spectrum['x_{0}'.format(self.unit_spectral_range)]
@@ -324,15 +368,36 @@ class DataConfocalScan(DataImage):
                         elif self.method == 'center_of_mass_position':
                             weights = np.maximum(spectrum['y_counts_per_seconds'], 0)
                             counts_for_image = np.average(spectrum['x_{0}'.format(self.unit_spectral_range)].to_numpy(), weights = weights)
-                        elif 'local_maximum_position' in self.method:
+                        elif 'local_maximum' in self.method:
                             spectrum.reset_index(drop = True, inplace = True)
                             indexes, _ = sps.find_peaks(spectrum['y_counts_per_seconds'].values, prominence = (spectrum['y_counts_per_seconds'].max()-spectrum['y_counts_per_seconds'].min())/10)
-                            number = int(self.method.split('local_maximum_position_')[1]) - 1
+                            number_of_peaks = int(self.method.split('_')[3])
+                            indexes = spectrum.loc[indexes, 'y_counts_per_seconds'].nlargest(number_of_peaks).index
+                            indexes = sorted(indexes)
+                            number = int(self.method.split('_')[4]) - 1
+                            if 'position' in self.method:
+                                try:
+                                    counts_for_image = spectrum.loc[indexes[number], 'x_{0}'.format(self.unit_spectral_range)]
+                                except IndexError:
+                                    counts_for_image = np.NaN
+                            elif 'intensity' in self.method:
+                                try:
+                                    counts_for_image = spectrum.loc[indexes[number], 'y_counts_per_seconds']
+                                except IndexError:
+                                    counts_for_image = np.NaN
+                        elif 'local_maxima_intensity_ratio' in self.method:
+                            spectrum.reset_index(drop = True, inplace = True)
+                            indexes, _ = sps.find_peaks(spectrum['y_counts_per_seconds'].values, prominence = (spectrum['y_counts_per_seconds'].max()-spectrum['y_counts_per_seconds'].min())/10)
+                            indexes = spectrum.loc[indexes, 'y_counts_per_seconds'].nlargest(2).index
+                            indexes = sorted(indexes)
+                            if 'subtract_minimum' in self.method:
+                                baseline = np.nanmin(spectrum['y_counts_per_seconds'].values)
+                            else:
+                                baseline = 0
                             try:
-                                counts_for_image = spectrum.loc[indexes[number], 'x_{0}'.format(self.unit_spectral_range)]
+                                counts_for_image = (spectrum.loc[indexes[0], 'y_counts_per_seconds'] - baseline)/(spectrum.loc[indexes[1], 'y_counts_per_seconds'] - baseline)
                             except IndexError:
                                 counts_for_image = np.NaN
-
 
                         if self.baseline['type'] != None and (set_pixel_to_zero or counts_for_image < 0):
                             counts_for_image = np.NaN
@@ -347,8 +412,128 @@ class DataConfocalScan(DataImage):
 
         return True
 
+    def fit_spectra(self, fitting_function = '2_voigt_and_linear_baseline', default_widths = 0.0001, parameter_scans = 3, goodness_of_fit_threshold = 0.9, save_to_file = False, file_name_for_fitting_parameter_maps = ''):
+        def calculate_goodness_of_fit(y_data, y_fit):
+            S_res = np.sum((y_data - y_fit)**2)
+            S_tot = np.sum((y_data - np.mean(y_data))**2)
+            return 1 - S_res/S_tot
+
+        def calculate_full_width_at_half_maximum(width_gaussian, width_lorentzian):
+            FWHM = []
+            for ix in range(len(width_gaussian)):
+                FWHM_along_y = []
+                for iy in range(len(width_gaussian[0])):
+                    if np.isnan(width_gaussian[ix][iy]) or np.isnan(width_lorentzian[ix][iy]):
+                        FWHM_along_y.append(np.NaN)
+                    else:
+                        x = np.linspace(1-3*(width_gaussian[ix][iy]+width_lorentzian[ix][iy]), 1+3*(width_gaussian[ix][iy]+width_lorentzian[ix][iy]), 1000)
+                        y = spsp.voigt_profile(x - 1, width_gaussian[ix][iy], width_lorentzian[ix][iy])
+                        maximum = np.max(y)
+                        df = pd.DataFrame(data = {'x' : x, 'y' : y})
+                        df['y_diff'] = np.abs(df.y - maximum/2)
+                        df_left = df[df['x'] < 1]
+                        df_right = df[df['x'] > 1]
+                        y_diff_left_min =  df_left['y_diff'].min()
+                        y_diff_right_min =  df_right['y_diff'].min()
+                        x_left = df_left[df_left['y_diff'] == y_diff_left_min].x.values
+                        x_right = df_right[df_right['y_diff'] == y_diff_right_min].x.values
+                        FWHM_along_y.append(np.abs(x_left - x_right)[0])
+                FWHM.append(FWHM_along_y)
+            return FWHM
+
+        def calculate_difference_in_peak_position(peak_position_1, peak_position_2):
+            return peak_position_1 - peak_position_2
+
+        def calculate_amplitude_ratio(amplitude_1, amplitude_2):
+            return amplitude_1/amplitude_2
+
+        self.fitting_parameters = {}
+        self.fitting_covariance = {}
+        self.goodness_of_fit = {}
+        self.fitting_parameter_map = {}
+        self.positions_of_bad_fits = []
+        if fitting_function == '2_voigt_and_linear_baseline':
+            fittings_parameter_identifier = ['Amplitude_1', 'Width_Gaussian_1', 'Width_Lorentzian_1', 'Position_Peak_1', 'Amplitude_2', 'Width_Gaussian_2', 'Width_Lorentzian_2', 'Position_Peak_2']
+            for identifier in fittings_parameter_identifier:
+                self.fitting_parameter_map[identifier] = []
+            for ix, x_position in enumerate(self.x):
+                fitting_parameter_list = {}
+                for identifier in fittings_parameter_identifier:
+                    fitting_parameter_list[identifier] = []
+                for iy, y_position in enumerate(self.y):
+                    position_string = convert_xy_to_position_string([x_position, y_position])
+                    self.fitting_parameters[position_string] = None
+                    self.fitting_covariance[position_string] = None
+                    self.goodness_of_fit[position_string] = 0
+                    for n in range(1,parameter_scans + 1):
+                        for k in range(1,parameter_scans + 1):
+                            try:
+                                p0 = np.zeros(10)
+                                slope, intersect = guess_linear_fit(self.sub_spectra[position_string], self.unit_spectral_range)
+                                p0[0] = slope
+                                p0[1] = intersect
+                                indexes, _ = sps.find_peaks(self.sub_spectra[position_string]['y_counts_per_seconds'].values, prominence = (self.sub_spectra[position_string]['y_counts_per_seconds'].max()-self.sub_spectra[position_string]['y_counts_per_seconds'].min())/10)
+                                indexes_local_maxima = self.sub_spectra[position_string].loc[indexes, 'y_counts_per_seconds'].nlargest(2).index
+                                indexes_local_maxima = sorted(indexes_local_maxima)
+                                p0[3] = default_widths*n
+                                p0[4] = default_widths*n
+                                width_voigt = 0.5346*default_widths + np.sqrt(0.2166*default_widths**2 + default_widths**2)
+                                p0[2] = self.sub_spectra[position_string].loc[indexes_local_maxima[0], 'y_counts_per_seconds']*width_voigt*k
+                                p0[5] = self.sub_spectra[position_string].loc[indexes_local_maxima[0], 'x_{0}'.format(self.unit_spectral_range)]
+                                p0[7] = default_widths*n
+                                p0[8] = default_widths*n
+                                width_voigt = 0.5346*default_widths + np.sqrt(0.2166*default_widths**2 + default_widths**2)
+                                p0[6] = self.sub_spectra[position_string].loc[indexes_local_maxima[1], 'y_counts_per_seconds']*width_voigt*k
+                                p0[9] = self.sub_spectra[position_string].loc[indexes_local_maxima[1], 'x_{0}'.format(self.unit_spectral_range)]
+                                self.fitting_parameters[position_string], self.fitting_covariance[position_string] = spo.curve_fit(two_voigt_and_linear_baseline,
+                                                                        self.sub_spectra[position_string]['x_{0}'.format(self.unit_spectral_range)], self.sub_spectra[position_string]['y_counts_per_seconds'],
+                                                                        p0 = p0)
+                                self.goodness_of_fit[position_string] = calculate_goodness_of_fit(self.sub_spectra[position_string]['y_counts_per_seconds'],
+                                                                                two_voigt_and_linear_baseline(self.sub_spectra[position_string]['x_{0}'.format(self.unit_spectral_range)],
+                                                                                self.fitting_parameters[position_string][0], self.fitting_parameters[position_string][1],
+                                                                                self.fitting_parameters[position_string][2], self.fitting_parameters[position_string][3], self.fitting_parameters[position_string][4], self.fitting_parameters[position_string][5],
+                                                                                self.fitting_parameters[position_string][6], self.fitting_parameters[position_string][7], self.fitting_parameters[position_string][8], self.fitting_parameters[position_string][9]))
+                                if self.goodness_of_fit[position_string] >= goodness_of_fit_threshold:
+                                    break
+                            except RuntimeError:
+                                pass
+                            except IndexError:
+                                break
+                        if self.goodness_of_fit[position_string] >= goodness_of_fit_threshold:
+                            break
+                        if self.goodness_of_fit[position_string] < goodness_of_fit_threshold and n == parameter_scans and k == parameter_scans:
+                            self.positions_of_bad_fits.append(position_string)
+                            self.fitting_parameters[position_string] = None
+                            self.fitting_covariance[position_string] = None
+                    for i, identifier in enumerate(fittings_parameter_identifier):
+                        try:
+                            fitting_parameter_list[identifier].append(self.fitting_parameters[position_string][i + 2])
+                        except TypeError:
+                            fitting_parameter_list[identifier].append(np.NaN)
+                print('Fitted Line {0}'.format(ix + 1))
+                for identifier in fittings_parameter_identifier:
+                    self.fitting_parameter_map[identifier].append(fitting_parameter_list[identifier])
+            for key in self.fitting_parameter_map:
+                self.fitting_parameter_map[key] = np.array(np.transpose(self.fitting_parameter_map[key]))
+
+            self.fitting_parameter_map['FWHM_1'] = calculate_full_width_at_half_maximum(self.fitting_parameter_map['Width_Gaussian_1'], self.fitting_parameter_map['Width_Lorentzian_1'])
+            self.fitting_parameter_map['FWHM_2'] = calculate_full_width_at_half_maximum(self.fitting_parameter_map['Width_Gaussian_2'], self.fitting_parameter_map['Width_Lorentzian_2'])
+            self.fitting_parameter_map['Delta_Peak_Positions'] = calculate_difference_in_peak_position(self.fitting_parameter_map['Position_Peak_1'], self.fitting_parameter_map['Position_Peak_2'])
+            self.fitting_parameter_map['Amplitude_Ratio'] = calculate_amplitude_ratio(self.fitting_parameter_map['Amplitude_1'], self.fitting_parameter_map['Amplitude_2'])
+
+        if save_to_file:
+            for key in self.fitting_parameter_map:
+                file_name_for_fitting_parameter_maps_key = file_name_for_fitting_parameter_maps + '_{0}.txt'.format(key)
+                np.savetxt(file_name_for_fitting_parameter_maps_key, self.fitting_parameter_map[key])
+
+        return True
+
     def add_image(self, scale_bar=None, scale='Auto', color_bar=True, plot_style=None, image_from_spectra=False,
-                  masking_treshold=None, interpolation=None):
+                  masking_treshold = None,
+                  interpolation=None,
+                  axis_ticks = False,
+                  image_from_fitting_parameters = False, fitting_parameter_identifier = 'Amplitude_1',
+                  image_from_file = False, image_file = '', image_identifier = ''):
         # Define function for formatting scale bar text
         def format_scale_bar(scale_value, unit='um'):
             if unit == 'um':
@@ -366,10 +551,14 @@ class DataConfocalScan(DataImage):
         # Plot image
         if image_from_spectra:
             self.image_data_to_plot = self.image_data_from_spectra
+        elif image_from_fitting_parameters:
+            self.image_data_to_plot = self.fitting_parameter_map[fitting_parameter_identifier]
+        elif image_from_file:
+            self.image_data_to_plot = np.loadtxt(image_file)
         else:
             self.image_data_to_plot = self.image_data
         if masking_treshold is not None:
-            self.image_data_to_plot = np.ma.masked_where(self.image_data_to_plot <= masking_treshold,
+            self.image_data_to_plot = np.ma.masked_where((self.image_data_to_plot <= masking_treshold[0]) | (self.image_data_to_plot >= masking_treshold[1]),
                                                          self.image_data_to_plot)
         if scale == 'Auto':
             im = axes.imshow(self.image_data_to_plot,
@@ -385,7 +574,7 @@ class DataConfocalScan(DataImage):
                                      self.extent['y_max']],
                              interpolation=interpolation)
         else:
-            default_scale = {'minimum_value': np.min(self.image_data_to_plot), 'maximum_value': np.max(self.image_data_to_plot), 'norm': None, 'color_map': 'gray'}
+            default_scale = {'minimum_value': np.nanmin(self.image_data_to_plot), 'maximum_value': np.nanmax(self.image_data_to_plot), 'norm': None, 'color_map': 'gray'}
             for key in default_scale:
                 if key not in scale:
                     scale[key] = default_scale[key]
@@ -430,23 +619,58 @@ class DataConfocalScan(DataImage):
             axes.add_artist(scalebar)
 
         # Turn axes labels/ticks off
-        plt.axis('off')
+        if axis_ticks:
+            axes.set_xlabel(r'Location $x$ ($\mathrm{\mu}$m)')
+            axes.set_ylabel(r'Location $y$ ($\mathrm{\mu}$m)')
+        else:
+            plt.axis('off')
 
         # Display color bar
         if color_bar:
             divider = make_axes_locatable(axes)
             cax = divider.append_axes('right', size='5%', pad=0.05)
             cbar = figure.colorbar(im, cax=cax, orientation='vertical')
-            if self.method == 'sum':
-                if scale == 'Normalized':
-                    cax.set_ylabel('Normalized PL-Intensity (rel. units)')
-                else:
-                    cax.set_ylabel('PL-Intensity (counts/second)')
-            elif 'position' in self.method:
-                if self.unit_spectral_range == 'eV':
-                    cax.set_ylabel('Photon Energy (eV)')
-                elif self.unit_spectral_range == 'nm':
-                    cax.set_ylabel('Wavelength (nm)')
+            if (not image_from_fitting_parameters) and (not image_from_file):
+                if self.method == 'sum':
+                    if scale == 'Normalized':
+                        cax.set_ylabel('Normalized PL-Intensity (rel. units)')
+                    else:
+                        cax.set_ylabel('PL-Intensity (counts/second)')
+                elif 'position' in self.method:
+                    if self.unit_spectral_range == 'eV':
+                        cax.set_ylabel('Photon Energy (eV)')
+                    elif self.unit_spectral_range == 'nm':
+                        cax.set_ylabel('Wavelength (nm)')
+                elif 'intensity' in self.method:
+                    if 'ratio' in self.method:
+                        cax.set_ylabel('PL-Intensity Ratio (rel. units)')
+                    else:
+                        if scale == 'Normalized':
+                            cax.set_ylabel('Normalized PL-Intensity (rel. units)')
+                        else:
+                            cax.set_ylabel('PL-Intensity (rel. units)')
+            elif (not image_from_file):
+                if fitting_parameter_identifier in ['Width_Gaussian_1', 'Width_Lorentzian_1', 'Position_Peak_1', 'Width_Gaussian_2', 'Width_Lorentzian_2', 'Position_Peak_2', 'FWHM_1', 'FWHM_2', 'Delta_Peak_Positions']:
+                    if self.unit_spectral_range == 'eV':
+                        cax.set_ylabel('Photon Energy (eV)')
+                    elif self.unit_spectral_range == 'nm':
+                        cax.set_ylabel('Wavelength (nm)')
+                elif fitting_parameter_identifier in ['Amplitude_1', 'Amplitude_2', 'Amplitude_Ratio']:
+                    if scale == 'Normalized':
+                        cax.set_ylabel('Normalized PL-Intensity (rel. units)')
+                    else:
+                        cax.set_ylabel('PL-Intensity (rel. units)')
+            else:
+                if image_identifier in ['Width_Gaussian_1', 'Width_Lorentzian_1', 'Position_Peak_1', 'Width_Gaussian_2', 'Width_Lorentzian_2', 'Position_Peak_2', 'FWHM_1', 'FWHM_2', 'Delta_Peak_Positions']:
+                    if self.unit_spectral_range == 'eV':
+                        cax.set_ylabel('Photon Energy (eV)')
+                    elif self.unit_spectral_range == 'nm':
+                        cax.set_ylabel('Wavelength (nm)')
+                elif image_identifier in ['Amplitude_1', 'Amplitude_2', 'Amplitude_Ratio']:
+                    if scale == 'Normalized':
+                        cax.set_ylabel('Normalized PL-Intensity (rel. units)')
+                    else:
+                        cax.set_ylabel('PL-Intensity (rel. units)')
 
         # Set nan pixel to red
         color_map = mpl.cm.get_cmap()

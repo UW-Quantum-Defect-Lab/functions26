@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="functions26",
-    version="0.0.9.0",
+    version="0.1.0.0",
     author="Vasilis Niaouris",
     author_email="vasilisniaouris@gmail.com",
     description="Supporting functions for Fu lab 26 room",

@@ -2,9 +2,11 @@
 # This code was made for use in the Fu lab
 # by Vasilis Niaouris
 
-from ..InstrumentHandler import GPIBInstrument
+
 import numpy as np
 import pandas as pd
+
+from ..InstrumentHandler import GPIBInstrument
 from ..units.frequency import frequency_units_dict
 from ..units.UnitClass import UnitClass
 

@@ -7,3 +7,4 @@ from scipy.constants import e, h, c
 c_nm = c*1e+9  # nm/s
 h_eV = h/e  # eV*s
 conversion_factor_nm_to_ev = h_eV*c_nm  # eV*nm
+n_air = 1.000293

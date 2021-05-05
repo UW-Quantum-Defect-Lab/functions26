@@ -2,15 +2,16 @@
 # This code was made for use in the Fu lab
 # by Vasilis Niaouris
 
-from spinmob import egg
-import time
-import numpy as np
-import threading
-import seaborn as sns
-from .units.UnitClass import UnitClass
 import multiprocessing as mp
+import numpy as np
+import seaborn as sns
+import threading
+import time
+
 from multiprocessing import shared_memory
-from functions26.filing.QDLFiling import QDLFDataManager
+from spinmob import egg
+from .filing.QDLFiling import QDLFDataManager
+from .units.UnitClass import UnitClass
 
 
 class BasicGUIFunctions:

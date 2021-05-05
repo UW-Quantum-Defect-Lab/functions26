@@ -31,6 +31,12 @@ class QDLFDataManager:
             raise TypeError('QDLFDataManager data must be either a DataFrame, DataFrame26 dict, Dict26,'
                             ' ndarray or NoneType.')
 
+        if type(self.data).__name__ == DataFrame26.__name__:
+            try:
+                dummy = self.data.default_keys
+            except AttributeError:
+                self.data.default_keys = self.data.keys()
+
         if self.parameters is None:
             self.parameters = dict()
         if not isinstance(self.parameters, dict):

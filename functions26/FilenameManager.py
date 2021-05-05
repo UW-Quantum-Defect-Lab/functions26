@@ -81,6 +81,7 @@ class FileNumberManager(FilenameManager):
 
         filenames = self._get_filenames()
         super().__init__(filenames)
+        self.filenumbers = self.multi_file_info['File Number']
 
     def _get_all_file_names_with_specific_file_types(self):
 
@@ -97,8 +98,9 @@ class FileNumberManager(FilenameManager):
         filenames = []
 
         for filename in all_file_names_with_specific_file_types:
-            if int(filename.split('_')[0]) in self.file_no_list:
-                filenames.append(filename)
+            if filename.split('_')[0].isnumeric():
+                if int(filename.split('_')[0]) in self.file_no_list:
+                    filenames.append(filename)
 
         filenames.sort()
         return filenames

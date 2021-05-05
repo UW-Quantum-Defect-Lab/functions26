@@ -2,13 +2,13 @@
 # This code was made for use in the Fu lab
 # by Vasilis Niaouris
 
-import pyvisa
+import numpy as np
 import nidaqmx
+import pandas as pd
+import pyvisa
 import serial as srl
 import time
 import warnings
-import pandas as pd
-import numpy as np
 
 
 class Instrument:

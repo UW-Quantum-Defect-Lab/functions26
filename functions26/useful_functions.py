@@ -6,8 +6,9 @@
 import numpy as np
 import smtplib  # for emails
 import ssl  # for emails
-from socket import gaierror  # for email server errors
 import re
+
+from socket import gaierror  # for email server errors
 # from validate_email import validate_email # to check if adress excists
 
 

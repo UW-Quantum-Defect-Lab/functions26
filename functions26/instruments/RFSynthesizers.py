@@ -2,9 +2,10 @@
 # This code was made for use in the Fu lab
 # by Vasilis Niaouris
 
-from ..InstrumentHandler import Instrument
-from windfreak import SynthHD  # this is a class
 import warnings
+
+from windfreak import SynthHD  # this is a class
+from ..InstrumentHandler import Instrument
 
 
 class WindfreakSythHDInstrument(Instrument):  # it is a serial instrument that has it's own class based on Serial

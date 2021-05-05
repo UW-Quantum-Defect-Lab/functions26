@@ -2,15 +2,18 @@
 # This code was made for use in the Fu lab
 # by Vasilis Niaouris
 
+import matplotlib.pyplot as plt
 import os
 import re as string_match
-import matplotlib.pyplot as plt
+import warnings
 
 
 class FileManipulation:
 
     def __init__(self, file_no_list, file_type, file_no_format='02', folder_name='.', save_folder='.',
                  bool_save_figures=True):
+        warnings.warn('The function FileManipulation is depricated and will be deleted soon. Use FileNumberManager'
+                      ' instead', DeprecationWarning)
         if isinstance(file_no_list, list):
             self.file_no_list = []
             self.file_name_list = []
