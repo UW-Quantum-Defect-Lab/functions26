@@ -116,6 +116,14 @@ def is_str_containing_float(string):
         return False
 
 
+def is_iterable(object):
+    try:
+        iterator = iter(object)
+        return True
+    except TypeError:
+        return False
+
+
 # def valid_emails(recipients):
 #     # checking recipient validity (only if the email is valid, not if it actually exists).
 #     if len(recipients) == 0:

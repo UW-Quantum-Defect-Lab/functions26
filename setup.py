@@ -3,6 +3,8 @@ import setuptools
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+sif_reader_dependency_string = 'sif_reader @ https://github.com/fujiisoup/sif_reader/tarball/master#egg=package-1.0'
+
 setuptools.setup(
     name="functions26",
     version="0.1.0.0",
@@ -28,7 +30,7 @@ setuptools.setup(
                       'pyqtgraph',
                       'scipy',
                       'seaborn',
-                      'sif_reader @ https://github.com/fujiisoup/sif_reader/tarball/master#egg=package-1.0',
+                     # sif_reader_dependency_string,
                       'spinmob',
                       'windfreak'],
     classifiers=[
