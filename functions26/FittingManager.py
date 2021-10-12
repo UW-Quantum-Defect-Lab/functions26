@@ -24,6 +24,8 @@ def get_model(model_name, model_prefix=''):
         mdl = models.ExponentialModel(prefix=model_prefix)
     elif model_name == 'logistic':
         mdl = models.StepModel(prefix=model_prefix, form='logistic')
+    elif model_name == 'sine':
+        mdl = models.SineModel(prefix=model_prefix)
     else:
         raise ValueError('Model name not recognized.')
 
@@ -269,11 +271,48 @@ class FittingManager:
         return self.x_init_fit_components, self.y_init_fit_components
 
 
+def linear_sine_fit(x_data, y_data, model_guess_index_regions=None,
+                    input_parameters=DataFrame({'names': [], 'initial_values': [], 'is_fixed': [], 'bounds': []}),
+                    weights=None):
+    model_names = ['linear', 'sine']
+    model_prefixes = ['', '']
+
+    models_df = DataFrame({'names': model_names, 'prefixes': model_prefixes})
+    if model_guess_index_regions is not None:
+        models_df['guess_index_regions'] = model_guess_index_regions
+
+    fitmng = FittingManager(x_data, y_data, models_df, input_parameters, weights)
+
+    return fitmng
+
+
 def voigt_linear_fit(x_data, y_data, model_guess_index_regions=None,
                      input_parameters=DataFrame({'names': [], 'initial_values': [], 'is_fixed': [], 'bounds': []}),
                      weights=None):
     model_names = ['voigt', 'linear']
     model_prefixes = ['', '']
+
+    models_df = DataFrame({'names': model_names, 'prefixes': model_prefixes})
+    if model_guess_index_regions is not None:
+        models_df['guess_index_regions'] = model_guess_index_regions
+
+    fitmng = FittingManager(x_data, y_data, models_df, input_parameters, weights)
+
+    if fitmng.fit_result is not None:
+        fwhm = fitmng.fit_result.params['fwhm']
+        center = fitmng.fit_result.params['center']
+    else:
+        fwhm = None
+        center = None
+
+    return fitmng, fwhm, center
+
+
+def voigt_linear_sine_fit(x_data, y_data, model_guess_index_regions=None,
+                          input_parameters=DataFrame({'names': [], 'initial_values': [], 'is_fixed': [], 'bounds': []}),
+                          weights=None):
+    model_names = ['voigt', 'linear', 'sine']
+    model_prefixes = ['', '', 'sine_']
 
     models_df = DataFrame({'names': model_names, 'prefixes': model_prefixes})
     if model_guess_index_regions is not None:

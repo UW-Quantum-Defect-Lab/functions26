@@ -17,7 +17,9 @@ class two_dimensional_plot:
                  scale='Auto',
                  color_bar=True, color_bar_label='',
                  shading='auto',
-                 plot_style=None):
+                 plot_style=None,
+                 fig=None,
+                 ax=None):
 
         self.data = data
         self.scale = scale
@@ -33,6 +35,8 @@ class two_dimensional_plot:
         self.y_axis_label = y_axis_label
 
         self.axes_limits = axes_limits
+        self.fig = fig
+        self.ax = ax
 
         self.add_plot()
 
@@ -42,8 +46,14 @@ class two_dimensional_plot:
             plt.style.use(self.plot_style)
 
         # Generate figure, axes
-        figure = plt.figure(figsize=(15, 10))
-        axes = figure.add_subplot(1, 1, 1)
+        if self.fig is None:
+            figure = plt.figure(figsize=(15, 10))
+        else:
+            figure = self.fig
+        if self.ax is None:
+            axes = figure.add_subplot(1, 1, 1)
+        else:
+            axes = self.ax
 
         # Axes
         default_axes_limits = {'x': [np.nanmin(self.x_axis), np.nanmax(self.x_axis)],
@@ -56,10 +66,10 @@ class two_dimensional_plot:
                     self.axes_limits[key] = default_axes_limits[key]
 
         if self.scale == 'Auto':
-            im = plt.pcolormesh(self.x_axis, self.y_axis, self.data,
-                                cmap=plt.get_cmap('gray'),
-                                shading=self.shading,
-                                rasterized=True
+            im = axes.pcolormesh(self.x_axis, self.y_axis, self.data,
+                                 cmap=plt.get_cmap('gray'),
+                                 shading=self.shading,
+                                 rasterized=True
                                 )
 
         else:
@@ -70,20 +80,21 @@ class two_dimensional_plot:
                     self.scale[key] = default_scale[key]
 
             if self.scale['norm'] is None:
-                im = plt.pcolormesh(self.x_axis, self.y_axis, self.data,
-                                    cmap=self.scale['color_map'],
-                                    vmin=self.scale['minimum_value'], vmax=self.scale['maximum_value'],
-                                    shading=self.shading,
-                                    rasterized=True
+                im = axes.pcolormesh(self.x_axis, self.y_axis, self.data,
+                                     cmap=self.scale['color_map'],
+                                     vmin=self.scale['minimum_value'], vmax=self.scale['maximum_value'],
+                                     shading=self.shading,
+                                     rasterized=True
                                     )
             elif self.scale['norm'] == 'log':
-                im = plt.pcolormesh(self.x_axis, self.y_axis, self.data,
-                                    cmap=self.scale['color_map'],
-                                    norm=LogNorm(vmin=self.scale['minimum_value'], vmax=self.scale['maximum_value']),
-                                    shading=self.shading,
-                                    rasterized=True
+                im = axes.pcolormesh(self.x_axis, self.y_axis, self.data,
+                                     cmap=self.scale['color_map'],
+                                     norm=LogNorm(vmin=self.scale['minimum_value'], vmax=self.scale['maximum_value']),
+                                     shading=self.shading,
+                                     rasterized=True
                                     )
 
+        cax = None
         if self.color_bar:
             divider = make_axes_locatable(axes)
             cax = divider.append_axes('right', size='5%', pad=0.05)
@@ -99,7 +110,7 @@ class two_dimensional_plot:
         axes.set_ylabel(self.y_axis_label)
 
         # Add figure and axes for to self further manipulation
-        self.plot = {'figure': figure, 'axes': axes}
+        self.plot = {'figure': figure, 'axes': axes, 'colorbar_axes': cax}
 
         return True
 

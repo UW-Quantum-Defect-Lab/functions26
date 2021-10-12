@@ -89,7 +89,7 @@ class DataGenerator2020AInstrument(GPIBInstrument):
     def join_pattern_arrays(pattern_list):
         if not (isinstance(pattern_list, np.ndarray) or isinstance(pattern_list, list)):
             raise TypeError('Pattern_list in not numpy.ndarray or list type')
-        if not (np.all([isinstance(pattern, np.ndarray) for pattern in pattern_list]) or\
+        if not (np.all([isinstance(pattern, np.ndarray) for pattern in pattern_list]) or
                 np.all([isinstance(pattern, list) for pattern in pattern_list])):
             raise TypeError('One or more patterns in pattern_list are of different type AND/OR'
                             ' not numpy.ndarray or list type.')

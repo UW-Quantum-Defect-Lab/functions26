@@ -19,6 +19,7 @@ from .DataDictXXX import DataDictFilenameInfo
 from .DataFrame26 import DataFrame26
 from .Dict26 import Dict26
 from .useful_functions import get_added_label_from_unit
+from .FittingManager import exp_with_bg_fit_turton_poison
 from .units import unit_families
 
 
@@ -353,13 +354,15 @@ class DataOP(DataXXX):
     spacer = '_'
     qdlf_datatype = 'op'
 
-    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True):
+    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True, run_turton_poison_fit_functions=True):
 
         self.infoOP = DataDictOP()
         self.size = -1
         self.simple_fit = None
+        self.turton_poison_fit = None
         self.time_step = None
         self.run_simple_fit_functions = run_simple_fit_functions
+        self.run_turton_poison_fit_functions = run_turton_poison_fit_functions
 
         super().__init__(file_name, folder_name,
                          self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
@@ -379,6 +382,16 @@ class DataOP(DataXXX):
                     self.get_simple_fit(units_y='counts_per_cycle_per_time_step')
             except (ValueError, RuntimeError) as e:
                 warnings.warn('Fit was not possible: ' + e)
+
+        if self.run_turton_poison_fit_functions:
+            try:
+                self.get_turton_poison_fit(units_y='counts')
+                self.get_turton_poison_fit(units_y='normalized_counts')
+                if self.infoOP['numRun'] is not None:
+                    self.get_turton_poison_fit(units_y='counts_per_cycle')
+                    self.get_turton_poison_fit(units_y='counts_per_cycle_per_time_step')
+            except (ValueError, RuntimeError) as e:
+                warnings.warn('Turton-Poison fit was not possible: ' + e)
 
     def get_data(self):
 
@@ -428,7 +441,9 @@ class DataOP(DataXXX):
 
     def get_additional_info(self):
         return {'infoOP': dict(self.infoOP), 'size': self.size, 'simple_fit': self.simple_fit,
-                'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions}
+                'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions,
+                'turton_poison_fit': self.turton_poison_fit,
+                'run_turton_poison_fit_functions': self.run_turton_poison_fit_functions}
 
     def set_additional_info(self, info_dictionary):
         self.infoOP = DataDictOP(**info_dictionary['infoOP'])
@@ -436,6 +451,8 @@ class DataOP(DataXXX):
         self.simple_fit = info_dictionary['simple_fit']
         self.time_step = info_dictionary['time_step']
         self.run_simple_fit_functions = info_dictionary['run_simple_fit_functions']
+        self.turton_poison_fit = info_dictionary['turton_poison_fit']
+        self.run_turton_poison_fit_functions = info_dictionary['run_turton_poison_fit_functions']
 
     def y_data_in_counts_per_cycle(self):
         rescaling_factor_cycle = (self.infoOP['numRun'] * self.infoOP['numPerRun'])  # per cycle
@@ -477,6 +494,11 @@ class DataOP(DataXXX):
     def get_single_index_in_time(self, value, unit_x='time_us'):
         return (self.data['x_{0}'.format(unit_x)] >= value - self.time_step / 2) & (self.data['x_{0}'.format(unit_x)] <=
                                                                                     value + self.time_step)
+
+    def get_starting_point(self):
+        start = self.infoOP['pumpOnTime_us']
+        x0 = float(self.data['x_time_us'][self.get_single_index_in_time(start)])
+        return x0
 
     @staticmethod
     def simple_fit_function(x, bg, ampl, b, x0):
@@ -552,6 +574,28 @@ class DataOP(DataXXX):
 
         return simple_fit
 
+    def get_turton_poison_fit(self, units_y='counts'):
+        units_y = 'y_{0}'.format(units_y)
+
+        start = self.infoOP['pumpOnTime_us']
+        end = 2 * self.infoOP['pumpOnTime_us']
+        x = np.array(self.data['x_time_us'][self.get_index_range_in_time_region(start, end)])
+        y = np.array(self.data[units_y][self.get_index_range_in_time_region(start, end)])
+
+        # we can only do the fitting if there are enough data points
+        if len(y) < 4:
+            return None
+
+        x0 = float(list(x)[0])
+
+        fitmng = exp_with_bg_fit_turton_poison(x-x0, y)
+
+        if self.turton_poison_fit is None:
+            self.turton_poison_fit = dict()
+        self.turton_poison_fit[units_y] = fitmng
+
+        return fitmng
+
 
 class DataOP2LaserDelay(DataXXX):
     allowed_file_extensions = ['csv', 'qdlf', 'json']
@@ -560,13 +604,15 @@ class DataOP2LaserDelay(DataXXX):
     spacer = '_'
     qdlf_datatype = 'op'
 
-    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True):
+    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True, run_turton_poison_fit_functions=True):
 
         self.infoOP2LaserDelay = DataDictOP2LaserDelay()
         self.size = -1
         self.simple_fit = None
+        self.turton_poison_fit = None
         self.time_step = None
         self.run_simple_fit_functions = run_simple_fit_functions
+        self.run_turton_poison_fit_functions = run_turton_poison_fit_functions
 
         super().__init__(file_name, folder_name,
                          self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
@@ -598,12 +644,30 @@ class DataOP2LaserDelay(DataXXX):
             except (ValueError, RuntimeError) as e:
                 warnings.warn('Fit was not possible: ' + e)
 
+        if self.run_turton_poison_fit_functions:
+            try:
+                self.get_turton_poison_fit(units_y='control_counts')
+                self.get_turton_poison_fit(units_y='control_normalized_counts')
+
+                self.get_turton_poison_fit(units_y='signal_counts')
+                self.get_turton_poison_fit(units_y='signal_normalized_counts')
+
+                if self.infoOP2LaserDelay['numRun'] is not None:
+                    self.get_turton_poison_fit(units_y='control_counts_per_cycle')
+                    self.get_turton_poison_fit(units_y='control_counts_per_cycle_per_time_step')
+
+                    self.get_turton_poison_fit(units_y='signal_counts_per_cycle')
+                    self.get_turton_poison_fit(units_y='signal_counts_per_cycle_per_time_step')
+
+            except (ValueError, RuntimeError) as e:
+                warnings.warn('Turton-Poison fit was not possible: ' + e)
+
     def get_data(self):
 
         self.labels['x_time_us'] = 'Time (us)'
         self.labels['y_counts'] = 'Counts (Arb. Units)'
         file_name = self.folder_name + '/' + self.file_name
-        from functions26.filing.QDLFiling import QDLFDataManager
+        from .filing.QDLFiling import QDLFDataManager
         file = QDLFDataManager.load(file_name)
         if file.datatype == 'op2laserdelay':
             self.size = len(file.data['x1'])
@@ -627,7 +691,9 @@ class DataOP2LaserDelay(DataXXX):
 
     def get_additional_info(self):
         return {'infoOP2LaserDelay': dict(self.infoOP2LaserDelay), 'size': self.size, 'simple_fit': self.simple_fit,
-                'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions}
+                'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions,
+                'turton_poison_fit': self.turton_poison_fit,
+                'run_turton_poison_fit_functions': self.run_turton_poison_fit_functions}
 
     def set_additional_info(self, info_dictionary):
         self.infoOP = DataDictOP2LaserDelay(**info_dictionary['infoOP2LaserDelay'])
@@ -635,6 +701,8 @@ class DataOP2LaserDelay(DataXXX):
         self.simple_fit = info_dictionary['simple_fit']
         self.time_step = info_dictionary['time_step']
         self.run_simple_fit_functions = info_dictionary['run_simple_fit_functions']
+        self.turton_poison_fit = info_dictionary['turton_poison_fit']
+        self.run_turton_poison_fit_functions = info_dictionary['run_turton_poison_fit_functions']
 
     def y_data_in_counts_per_cycle(self):
         rescaling_factor_cycle = (self.infoOP2LaserDelay['numRun'] * self.infoOP2LaserDelay['numPerRun'])  # per cycle
@@ -787,6 +855,33 @@ class DataOP2LaserDelay(DataXXX):
 
         return simple_fit
 
+    def get_turton_poison_fit(self, units_y='counts'):
+        units_y = 'y_{0}'.format(units_y)
+
+        if units_y.startswith('y_control'):
+            start, end = self.get_control_start_end_indices()
+            x = np.array(self.data['x_control_time_us'][start:end])
+        elif units_y.startswith('y_signal'):
+            start, end = self.get_signal_start_end_indices()
+            x = np.array(self.data['x_signal_time_us'][start:end])
+        else:
+            return None
+        y = np.array(self.data[units_y][start:end])
+
+        # we can only do the fitting if there are enough data points
+        if len(y) < 4:
+            return None
+
+        x0 = float(list(x)[0])
+
+        fitmng = exp_with_bg_fit_turton_poison(x-x0, y)
+
+        if self.turton_poison_fit is None:
+            self.turton_poison_fit = dict()
+        self.turton_poison_fit[units_y] = fitmng
+
+        return fitmng
+
 
 class DataT1(DataXXX):
     allowed_file_extensions = ['csv']
@@ -795,10 +890,12 @@ class DataT1(DataXXX):
     spacer = '_'
     qdlf_datatype = 't1'
 
-    def __init__(self, file_name, folder_name='.'):
+    def __init__(self, file_name, folder_name='.', run_turton_poison_fit_functions=True):
 
         self.infoT1 = DataDictT1()
         self.size = -1
+        self.run_turton_poison_fit_functions = run_turton_poison_fit_functions
+        self.turton_poison_fit = None
 
         super().__init__(file_name, folder_name,
                          self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer)
@@ -806,6 +903,15 @@ class DataT1(DataXXX):
     def __post_init__(self):
         self.y_data_in_counts_per_cycle()
         self.y_data_in_normalized_on_peak_counts()
+
+        if self.run_turton_poison_fit_functions:
+            try:
+                self.get_turton_poison_fit(units_y='counts')
+                self.get_turton_poison_fit(units_y='normalized_counts')
+                if self.infoT1['numRun'] is not None:
+                    self.get_turton_poison_fit(units_y='counts_per_cycle')
+            except (ValueError, RuntimeError) as e:
+                warnings.warn('Turton-Poison fit was not possible: ' + e)
 
     def get_data(self):
 
@@ -851,11 +957,15 @@ class DataT1(DataXXX):
         return True
 
     def get_additional_info(self):
-        return {'infoT1': dict(self.infoT1), 'size': self.size}
+        return {'infoT1': dict(self.infoT1), 'size': self.size,
+                'turton_poison_fit': self.turton_poison_fit,
+                'run_turton_poison_fit_functions': self.run_turton_poison_fit_functions}
 
     def set_additional_info(self, info_dictionary):
         self.infoT1 = DataDictT1(**info_dictionary['infoT1'])
         self.size = info_dictionary['size']
+        self.turton_poison_fit = info_dictionary['turton_poison_fit']
+        self.run_turton_poison_fit_functions = info_dictionary['run_turton_poison_fit_functions']
 
     def y_data_in_counts_per_cycle(self):
         rescaling_factor_cycle = (self.infoT1['numRun'] * self.infoT1['numPerRun'])  # per cycle
@@ -868,6 +978,24 @@ class DataT1(DataXXX):
         self.data['y_normalized_counts'] = [counts / rescaling_factor_normalize for counts in self.data.y_counts]
         self.labels['y_normalized_counts'] = 'Counts normalized to max'
         return True
+
+    def get_turton_poison_fit(self, units_y='counts'):
+        units_y = 'y_{0}'.format(units_y)
+
+        x = np.array(self.data['x_time_us'])
+        y = np.array(self.data[units_y])
+
+        # we can only do the fitting if there are enough data points
+        if len(y) < 4:
+            return None
+
+        fitmng = exp_with_bg_fit_turton_poison(x, y)
+
+        if self.turton_poison_fit is None:
+            self.turton_poison_fit = dict()
+        self.turton_poison_fit[units_y] = fitmng
+
+        return fitmng
 
 
 # Added by Chris Zimmerman
@@ -963,3 +1091,114 @@ class DataSPCMCounter(DataXXX):
         self.data = pd.DataFrame(data={'time': range(len(counts)), 'counts_per_second': counts[::-1]})
 
         return True
+
+
+class DataQDLF(DataXXX):
+    allowed_file_extensions = ['qdlf', 'in_code_data_manager']
+
+    def __init__(self, file_name, default_keys, allowed_units, spacer, qdlf_datatype, folder_name='./',
+                 data_manager=None):
+        """In case the user provides a data manager, the filename and folder are neglected"""
+        self.average = None
+        self.stdev = None
+        self.data_manager = data_manager
+        super().__init__(file_name, folder_name, default_keys, allowed_units, self.allowed_file_extensions, spacer,
+                         qdlf_datatype)
+
+    def __post_init__(self):
+        self._set_averages()
+        self._set_stdevs()
+
+    def get_additional_info(self):
+        return {'average': self.average, 'stdev': self.stdev}
+
+    def set_additional_info(self, info_dictionary):
+        self.average = info_dictionary['average']
+        self.stdev = info_dictionary['stdev']
+
+    def _set_averages(self):
+        self.average = DataFrame26(self.default_keys, self.allowed_units, self.spacer)
+        for key in self.data.keys():
+            self.average[key] = [np.average(self.data[key])]
+
+    def _set_stdevs(self):
+        self.stdev = DataFrame26(self.default_keys, self.allowed_units, self.spacer)
+        for key in self.data.keys():
+            self.stdev[key] = [np.std(self.data[key])]
+
+
+class DataSPCM(DataQDLF):
+    allowed_units = {'Length': unit_families['Length'], 'Energy': unit_families['Energy'],
+                     'Time': unit_families['Time']}
+    default_keys = ['x_second', 'y_counts', 'y_counts_per_second', 'y_counts_per_second_per_power']
+    spacer = '_'
+    qdlf_datatype = 'spcm'
+
+    def __init__(self, file_name, folder_name='./', data_manager=None):
+        super().__init__(file_name, self.default_keys, self.allowed_units, self.spacer, self.qdlf_datatype, folder_name,
+                         data_manager)
+
+    def get_data(self):
+        # gets data from raw files
+        if self.data_manager is None:
+            from .filing.QDLFInterface import QDLFDataManager
+            self.data_manager = QDLFDataManager.load(self.folder_name + '/' + self.file_name)
+
+        file = self.data_manager
+        self.data['x_second'] = file.data['x1']
+        self.data['y_counts'] = file.data['y1']
+        self.data['y_counts_per_second'] = file.data['y1'] / file.parameters['time_step']
+
+        return True
+
+
+class DataPower(DataQDLF):
+    allowed_units = {'Length': unit_families['Length'], 'Energy': unit_families['Energy'],
+                     'Time': unit_families['Time']}
+    default_keys = ['x_second', 'y_uW']
+    spacer = '_'
+
+    qdlf_datatype = 'power'
+
+    def __init__(self, file_name, folder_name='./', data_manager=None):
+        super().__init__(file_name, self.default_keys, self.allowed_units, self.spacer, self.qdlf_datatype, folder_name,
+                         data_manager)
+
+    def get_data(self):
+        # gets data from raw files
+        if self.data_manager is None:
+            from .filing.QDLFInterface import QDLFDataManager
+            self.data_manager = QDLFDataManager.load(self.folder_name + '/' + self.file_name)
+
+        file = self.data_manager
+        self.data['x_second'] = file.data['x1']
+        self.data['y_uW'] = file.data['y1']
+
+        return True
+
+
+class DataWavelength(DataQDLF):
+    allowed_units = {'Length': unit_families['Length'], 'Energy': unit_families['Energy'],
+                     'Frequency': unit_families['Frequency'], 'Time': unit_families['Time']}
+    spacer = '_'
+    default_keys = ['x_second', 'y_nm']
+    qdlf_datatype = 'wavelength'
+
+    def __init__(self, file_name, folder_name='./', data_manager=None):
+        super().__init__(file_name, self.default_keys, self.allowed_units, self.spacer, self.qdlf_datatype, folder_name,
+                         data_manager)
+
+    def get_data(self):
+        # gets data from raw files
+        if self.data_manager is None:
+            from .filing.QDLFInterface import QDLFDataManager
+            self.data_manager = QDLFDataManager.load(self.folder_name + '/' + self.file_name)
+
+        file = self.data_manager
+        self.data['x_second'] = file.data['x1']
+        self.data['y_nm'] = file.data['y1']
+
+        return True
+
+
+

@@ -96,21 +96,29 @@ class DataMagnetoPL(Data2D):
         return True
 
     def add_heatmap(self,
-                    axes_limits = 'Auto',
-                    scale = 'Auto',
-                    color_bar = True,
-                    shading = 'auto',
-                    plot_style = None,
-                    plot_normalized_spectra = False):
-        if self.x_axis_identifier == 'eV':
-            x_axis_label = 'Photon Energy (eV)'
-        elif self.x_axis_identifier == 'nm':
-            x_axis_label = 'Wavelength (nm)'
-        y_axis_label = 'Magnetic Field (T)'
-        if plot_normalized_spectra:
-            color_bar_label = 'Normalized PL-Intensity (rel. units)'
-        else:
-            color_bar_label = 'PL-Intensity (counts/second)'
+                    axes_limits='Auto',
+                    scale='Auto',
+                    color_bar=True,
+                    shading='auto',
+                    plot_style=None,
+                    plot_normalized_spectra=False,
+                    x_axis_label=None,
+                    y_axis_label=None,
+                    color_bar_label=None,
+                    fig=None,
+                    ax=None):
+        if x_axis_label is None:
+            if self.x_axis_identifier == 'eV':
+                x_axis_label = 'Photon Energy (eV)'
+            elif self.x_axis_identifier == 'nm':
+                x_axis_label = 'Wavelength (nm)'
+        if y_axis_label is None:
+            y_axis_label = 'Magnetic Field (T)'
+        if color_bar_label is None:
+            if plot_normalized_spectra:
+                color_bar_label = 'Normalized PL-Intensity (rel. units)'
+            else:
+                color_bar_label = 'PL-Intensity (counts/second)'
 
         if plot_normalized_spectra:
             data = self.data_normalized
@@ -118,14 +126,16 @@ class DataMagnetoPL(Data2D):
             data = self.data
 
         self.heatmap = two_dimensional_plot(data, self.x_axis, self.y_axis,
-                                            x_axis_label = x_axis_label,
-                                            y_axis_label = y_axis_label,
-                                            axes_limits = axes_limits,
-                                            scale = scale,
-                                            color_bar = color_bar,
-                                            color_bar_label = color_bar_label,
-                                            shading = shading,
-                                            plot_style = plot_style)
+                                            x_axis_label=x_axis_label,
+                                            y_axis_label=y_axis_label,
+                                            axes_limits=axes_limits,
+                                            scale=scale,
+                                            color_bar=color_bar,
+                                            color_bar_label=color_bar_label,
+                                            shading=shading,
+                                            plot_style=plot_style,
+                                            fig=fig,
+                                            ax=ax)
 
         return True
 

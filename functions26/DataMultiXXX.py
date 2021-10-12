@@ -14,7 +14,8 @@ from .constants import n_air
 from .constants import conversion_factor_nm_to_ev
 from .DataFrame26 import DataFrame26
 from .DataDictXXX import DataDictFilenameInfo
-from .DataXXX import DataSIF, DataOP, DataOP2LaserDelay, DataT1, DataRFSpectrum, DataSPCMCounter
+from .DataXXX import DataSIF, DataOP, DataOP2LaserDelay, DataT1, DataRFSpectrum, DataSPCMCounter, DataSPCM, DataPower,\
+    DataWavelength
 from .Plot2D import two_dimensional_plot
 
 
@@ -69,7 +70,7 @@ class DataMultiXXX:
         return iter(self.data_object_list)
 
     def get_data_object_list(self) -> List[Union[DataSIF, DataOP, DataOP2LaserDelay, DataT1, DataRFSpectrum,
-                                                 DataSPCMCounter]]:
+                                                 DataSPCMCounter, DataSPCM, DataPower, DataWavelength]]:
         warnings.warn('Define your own get_data_list() function')
         return []
 
@@ -149,6 +150,7 @@ class DataMultiSIF(DataMultiXXX):
 
         if baseline is not None:
             self.baseline = {}
+            self.sub_spectrum_for_fitting = {}
 
         integrated_pl = {key: [] for key in dictionary_keys}
         for n, data_object in enumerate(sorted_data_object_list):
@@ -158,28 +160,41 @@ class DataMultiSIF(DataMultiXXX):
                 y = data_object.integrate_counts(unit_y, subtract_bg)
             else:
                 y = data_object.integrate_in_region(range[0], range[1], unit_x, unit_y, subtract_bg)
-                if baseline == 'linear':
-                    self.baseline[label_value] = {}
-                    index_left = np.abs(data_object.data['x_{0}'.format(unit_x)] - range[0]).idxmin()
-                    index_right = np.abs(data_object.data['x_{0}'.format(unit_x)] - range[1]).idxmin()
-                    sub_spectrum_for_fitting_left = data_object.data.loc[index_left - 5: index_left + 5]
-                    sub_spectrum_for_fitting_right = data_object.data.loc[index_right - 5: index_right + 5]
-                    sub_spectrum_for_fitting = pd.concat([sub_spectrum_for_fitting_left,
-                                                          sub_spectrum_for_fitting_right], ignore_index=True)
-                    p0 = guess_initial_parameters(sub_spectrum_for_fitting['x_{0}'.format(unit_x)],
-                                                  sub_spectrum_for_fitting['y_{0}'.format(unit_y)], 'linear')
-                    parameters, covariance = spo.curve_fit(line, sub_spectrum_for_fitting['x_{0}'.format(unit_x)],
-                                                           sub_spectrum_for_fitting['y_{0}'.format(unit_y)], p0=p0)
-                    self.baseline[label_value]['slope_initial'] = p0[0]
-                    self.baseline[label_value]['intersect_initial'] = p0[1]
-                    self.baseline[label_value]['slope'] = parameters[0]
-                    self.baseline[label_value]['intersect'] = parameters[1]
-                if baseline == 'linear':
-                    sub_spectrum = data_object.data.loc[(data_object.data['x_{0}'.format(unit_x)] >= range[0]) & (
-                            data_object.data['x_{0}'.format(unit_x)] <= range[1])]
-                    y = y - (line(sub_spectrum['x_{0}'.format(unit_x)], self.baseline[label_value]['slope'],
-                                  self.baseline[label_value]['intersect']) - data_object.infoSIF[
-                                 'background_{0}'.format(unit_y)]).sum()
+                if baseline != None:
+                    if baseline == 'linear_in_full_range':
+                        self.baseline[data_object] = {}
+                        index_left = np.abs(data_object.data['x_{0}'.format(unit_x)] - range[0]).idxmin()
+                        index_right = np.abs(data_object.data['x_{0}'.format(unit_x)] - range[1]).idxmin()
+                        sub_spectrum_for_fitting_left = data_object.data.loc[index_left - 1: index_left + 1]
+                        sub_spectrum_for_fitting_right = data_object.data.loc[index_right - 1: index_right + 1]
+                        sub_spectrum_for_fitting = pd.concat([sub_spectrum_for_fitting_left,
+                                                              sub_spectrum_for_fitting_right], ignore_index=True)
+                        self.sub_spectrum_for_fitting[data_object] = sub_spectrum_for_fitting
+                    elif 'linear_in_range' in baseline:
+                        self.baseline[data_object] = {}
+                        range_left = float(baseline.split('linear_in_range_')[-1].split('_')[0])
+                        range_right = float(baseline.split('linear_in_range_')[-1].split('_')[1])
+                        index_left = np.abs(data_object.data['x_{0}'.format(unit_x)] - range_left).idxmin()
+                        index_right = np.abs(data_object.data['x_{0}'.format(unit_x)] - range_right).idxmin()
+                        sub_spectrum_for_fitting_left = data_object.data.loc[index_left - 1: index_left + 1]
+                        sub_spectrum_for_fitting_right = data_object.data.loc[index_right - 1: index_right + 1]
+                        sub_spectrum_for_fitting = pd.concat([sub_spectrum_for_fitting_left,
+                                                              sub_spectrum_for_fitting_right], ignore_index=True)
+                        self.sub_spectrum_for_fitting[data_object] = sub_spectrum_for_fitting
+                    if 'linear' in baseline:
+                        p0 = guess_initial_parameters(sub_spectrum_for_fitting['x_{0}'.format(unit_x)],
+                                                      sub_spectrum_for_fitting['y_{0}'.format(unit_y)], 'linear')
+                        parameters, covariance = spo.curve_fit(line, sub_spectrum_for_fitting['x_{0}'.format(unit_x)],
+                                                               sub_spectrum_for_fitting['y_{0}'.format(unit_y)], p0=p0)
+                        self.baseline[data_object]['slope_initial'] = p0[0]
+                        self.baseline[data_object]['intersect_initial'] = p0[1]
+                        self.baseline[data_object]['slope'] = parameters[0]
+                        self.baseline[data_object]['intersect'] = parameters[1]
+                        sub_spectrum = data_object.data.loc[(data_object.data['x_{0}'.format(unit_x)] >= range[0]) & (
+                                data_object.data['x_{0}'.format(unit_x)] <= range[1])]
+                        y = y - (line(sub_spectrum['x_{0}'.format(unit_x)], self.baseline[data_object]['slope'],
+                                      self.baseline[data_object]['intersect'])).sum()
+
             integrated_pl['PL'].append(y)
             for key in dictionary_keys[2:]:
                 integrated_pl[key].append(data_object.file_info[key])
@@ -279,6 +294,7 @@ class DataMultiOP(DataMultiXXX):
     def __init__(self, file_name_list, folder_name='.', run_simple_fit_functions=True):
         self.run_simple_fit_functions = run_simple_fit_functions
         super().__init__(file_name_list, folder_name)
+        self.multi_info_op = self.get_multi_info_op()
 
     def get_data_object_list(self) -> List[DataOP]:
         data_object_list = []
@@ -288,12 +304,20 @@ class DataMultiOP(DataMultiXXX):
 
         return data_object_list
 
+    def get_multi_info_op(self):
+        multi_info_op = DataFrame26([], self.data_object_list[0].allowed_units, self.data_object_list[0].spacer)
+        for data_object in self:
+            multi_info_op = multi_info_op.append(dict(data_object.infoOP), ignore_index=True)
+
+        return multi_info_op
+
 
 class DataMultiOP2LaserDelay(DataMultiXXX):
 
     def __init__(self, file_name_list, folder_name='.', run_simple_fit_functions=True):
         self.run_simple_fit_functions = run_simple_fit_functions
         super().__init__(file_name_list, folder_name)
+        self.multi_info_op_delay = self.get_multi_info_op_delay()
 
     def get_data_object_list(self) -> List[DataOP2LaserDelay]:
         data_object_list = []
@@ -302,6 +326,14 @@ class DataMultiOP2LaserDelay(DataMultiXXX):
                                                       run_simple_fit_functions=self.run_simple_fit_functions))
 
         return data_object_list
+
+    def get_multi_info_op_delay(self):
+        multi_info_op_delay = DataFrame26([], self.data_object_list[0].allowed_units,
+                                               self.data_object_list[0].spacer)
+        for data_object in self:
+            multi_info_op_delay = multi_info_op_delay.append(dict(data_object.infoOP2LaserDelay), ignore_index=True)
+
+        return multi_info_op_delay
 
 
 class DataMultiT1(DataMultiXXX):
@@ -341,3 +373,65 @@ class DataMultiSPCMCounter(DataMultiXXX):
             data_object_list.append(DataSPCMCounter(file_name=file_name, folder_name=self.folder_name))
 
         return data_object_list
+
+
+class DataMultiXXXQDLF(DataMultiXXX):
+    def __init__(self, file_name_list, folder_name='.'):
+        self.averages = None
+        self.stdevs = None
+        super().__init__(file_name_list, folder_name)
+        self.__post_init__()
+
+    def __post_init__(self):
+        self.spacer = self.data_object_list[0].spacer
+        self.allowed_units = self.data_object_list[0].allowed_units
+        self.default_keys = list(self.data_object_list[0].data.keys())
+        self._set_averages()
+        self._set_stdevs()
+
+    def _set_averages(self):
+        self.averages = DataFrame26(self.default_keys, self.allowed_units, self.spacer)
+        for key in self.default_keys:
+            self.averages[key] = [np.array(data_object.average[key])[0] for data_object in self.data_object_list]
+
+    def _set_stdevs(self):
+        self.stdevs = DataFrame26(self.default_keys, self.allowed_units, self.spacer)
+        for key in self.default_keys:
+            self.stdevs[key] = [np.array(data_object.stdev[key])[0] for data_object in self.data_object_list]
+
+
+class DataMultiSPCM(DataMultiXXXQDLF):
+    def __init__(self, file_name_list, folder_name='.'):
+        super().__init__(file_name_list, folder_name)
+
+    def get_data_object_list(self) -> List[DataSPCM]:
+        data_object_list = []
+        for file_name in self.filename_list:
+            data_object_list.append(DataSPCM(file_name=file_name, folder_name=self.folder_name))
+
+        return data_object_list
+
+
+class DataMultiPower(DataMultiXXXQDLF):
+    def __init__(self, file_name_list, folder_name='.'):
+        super().__init__(file_name_list, folder_name)
+
+    def get_data_object_list(self) -> List[DataPower]:
+        data_object_list = []
+        for file_name in self.filename_list:
+            data_object_list.append(DataPower(file_name=file_name, folder_name=self.folder_name))
+
+        return data_object_list
+
+
+class DataMultiWavelength(DataMultiXXXQDLF):
+    def __init__(self, file_name_list, folder_name='.'):
+        super().__init__(file_name_list, folder_name)
+
+    def get_data_object_list(self) -> List[DataWavelength]:
+        data_object_list = []
+        for file_name in self.filename_list:
+            data_object_list.append(DataWavelength(file_name=file_name, folder_name=self.folder_name))
+
+        return data_object_list
+

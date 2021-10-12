@@ -4,12 +4,14 @@
 
 
 import csv
-from dataclasses import dataclass, field
 import json
 import numpy as np
-from pandas import DataFrame
 import pickle
-from typing import Any
+
+from dataclasses import dataclass, field
+from pandas import DataFrame
+from typing import Any, List
+
 from ..useful_functions import add_extension_if_necessary
 from ..units.UnitClass import UnitClass
 from ..DataFrame26 import DataFrame26
@@ -270,4 +272,53 @@ class QDLFDataManager:
             writer = csv.writer(file, lineterminator='\n')
             for row in rows:
                 writer.writerow(row)
+
+
+class MultiQDLF:
+
+    def __init__(self, qdlf_data_manager_list: List[QDLFDataManager], identifiers: List[str],
+                 multidatatype: str = None):
+
+        if len(qdlf_data_manager_list) != len(identifiers):
+            raise ValueError('Length of qdlf_data_manager_list must be the same as the one of the identifiers')
+
+        self.data_managers: List[QDLFDataManager] = qdlf_data_manager_list
+        self.identifiers = identifiers
+        self.multidatatype = multidatatype
+
+    def save(self, filename):
+        if filename.split('.')[-1] == 'mqdlf':
+            self.save_as_mqdlf(filename)
+        elif filename.split('.')[-1] == 'json':
+            self.save_as_jsons(filename)
+        elif filename.split('.')[-1] == 'csv':
+            self.save_as_csvs(filename)
+        else:
+            self.save_as_mqdlf(filename)
+
+    def save_as_mqdlf(self, filename):
+        filename = add_extension_if_necessary(filename, 'mqdlf')
+        with open(filename, 'wb') as file:
+            pickle.dump(self, file)
+
+    def save_as_jsons(self, filename):
+        if filename.split('.')[-1] == 'json':
+            filename = ''.join(filename.split('.')[:-1])
+        for i, identifier in enumerate(self.identifiers):
+            filename = f"{filename}_{self.multidatatype}_{identifier}.json"
+            self.data_managers[i].save_as_json(filename)
+
+    def save_as_csvs(self, filename):
+        if filename.split('.')[-1] == 'csv':
+            filename = ''.join(filename.split('.')[:-1])
+        for i, identifier in enumerate(self.identifiers):
+            filename_i = f"{filename}_{self.multidatatype}_{identifier}.csv"
+            self.data_managers[i].save_as_csv(filename_i)
+
+    @classmethod
+    def load(cls, filename):
+        filename = add_extension_if_necessary(filename, 'mqdlf')
+        with open(filename, 'rb') as file:
+            obj = pickle.load(file)
+        return cls(obj.data_managers, obj.identifiers, obj.multidatatype)
 
