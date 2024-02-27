@@ -3,7 +3,6 @@
 # by Vasilis Niaouris
 # Added/Edited by Chris on 2020-09-21
 
-# from dataclasses import dataclass, field
 import warnings
 
 from .Dict26 import Dict26
@@ -404,46 +403,3 @@ class DataDictFilenameInfo(Dict26):
         except:
             warnings.warn('Filename does not follow filenaming convention')
         return True
-
-# @dataclass
-# class DataclassSIF:
-#     cal_data: list = field(default_factory=list)
-#     exposure_time: float = -1
-#     cycles: int = -1
-#     wavelength_offset: float = 0
-#     background_per_cycle: float = 300
-#     background: float = 0
-
-
-# @dataclass
-# class DataclassOP:
-#     numRun: int = -1
-#     numPerRun: int = -1
-#     pumpOnTime_us: float = -1
-#     pumpOnTime_ms: float = -1
-#     pumpOffTime_us: float = -1
-#     pumpOffTime_ms: float = -1
-#
-#
-# @dataclass
-# class DataclassT1:
-#     numRun: int = -1
-#     numPerRun: int = -1
-#     pumpOnTime_us: float = -1
-#     pumpOnTime_ms: float = -1
-#     gateOnTime_us: float = -1
-#     gateOnTime_ms: float = -1
-#     gateOffsetTime_us: float = -1
-#     gateOffsetTime_ms: float = -1
-#     clockRes_us: float = -1
-#     clockRes_ms: float = -1
-#
-#
-# @dataclass
-# class DataclassFilenameInfo:
-#     power_uW: float = -1
-#     power_nW: float = -1
-#     power_mW: float = -1
-#     temperature_K: float = -1
-#     magnetic_field_T: float = -1
-#     magnetic_field_mT: float = -1

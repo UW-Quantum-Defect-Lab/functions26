@@ -89,24 +89,27 @@ class DataFrame26(DataFrame):
     # but it does not save it in the Dataframe26 object.
     # for unknown reason when we call
     def __getitem__(self, key):
-        if key not in self.default_keys and key not in self.keys():
-            # second part of if statements is here in case you change default_keys and old keys are not in them
-            key_unit, key_unit_family = get_unit(key, self.allowed_units, self.spacer)  # string
-            key_column, original_column_key = get_dataframe_column(key, self.keys(),
-                                                                   self.allowed_units, key_unit_family,
-                                                                   self.spacer)  # string
-            if key_unit is not None and key_column is not None:
-                data = super(DataFrame26, self).__getitem__(original_column_key)
-                original_column_key_units = self.allowed_units[key_unit_family][get_unit_string(original_column_key,
-                                                                                                self.spacer)]
-                # actually add this new unit to the dataframe26
-                if not self.restrict_to_defaults:
-                    super(DataFrame26, self).__setitem__(key, data.rename(key)
-                                                         * self.allowed_units[key_unit_family][key_unit]
-                                                         / original_column_key_units)
-                    return data.rename(key) * self.allowed_units[key_unit_family][key_unit] / original_column_key_units
-            else:
-                return super(DataFrame26, self).__getitem__(key)
+        try:
+            if key not in self.default_keys and key not in self.keys():
+                # second part of if statements is here in case you change default_keys and old keys are not in them
+                key_unit, key_unit_family = get_unit(key, self.allowed_units, self.spacer)  # string
+                key_column, original_column_key = get_dataframe_column(key, self.keys(),
+                                                                       self.allowed_units, key_unit_family,
+                                                                       self.spacer)  # string
+                if key_unit is not None and key_column is not None:
+                    data = super(DataFrame26, self).__getitem__(original_column_key)
+                    original_column_key_units = self.allowed_units[key_unit_family][get_unit_string(original_column_key,
+                                                                                                    self.spacer)]
+                    # actually add this new unit to the dataframe26
+                    if not self.restrict_to_defaults:
+                        super(DataFrame26, self).__setitem__(key, data.rename(key)
+                                                             * self.allowed_units[key_unit_family][key_unit]
+                                                             / original_column_key_units)
+                        return data.rename(key) * self.allowed_units[key_unit_family][key_unit] / original_column_key_units
+                else:
+                    return super(DataFrame26, self).__getitem__(key)
+        except AttributeError:
+            pass
 
         return super(DataFrame26, self).__getitem__(key)
 

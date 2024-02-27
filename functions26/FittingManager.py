@@ -16,12 +16,26 @@ def get_model(model_name, model_prefix=''):
         mdl = models.VoigtModel(prefix=model_prefix)
     elif model_name == 'gauss':
         mdl = models.GaussianModel(prefix=model_prefix)
+    elif model_name == 'fano':
+        mdl = models.BreitWignerModel(prefix=model_prefix)
+        mdl.set_param_hint('amplitude', min=0, max=np.inf)
     elif model_name == 'constant':
         mdl = models.ConstantModel(prefix=model_prefix)
     elif model_name == 'linear':
         mdl = models.LinearModel(prefix=model_prefix)
+    elif model_name == 'quadratic':
+        mdl = models.QuadraticModel(prefix=model_prefix)
+    elif model_name.startswith('polynomial'):
+        try:
+            degree = int(model_name.replace('polynomial', ''))
+            mdl = models.PolynomialModel(prefix=model_prefix, degree=degree)
+        except ValueError:
+            mdl = models.PolynomialModel(prefix=model_prefix)
     elif model_name == 'exp':
         mdl = models.ExponentialModel(prefix=model_prefix)
+    elif model_name == 'exp_gauss':
+        mdl = models.ExponentialGaussianModel(prefix=model_prefix)
+        mdl.set_param_hint('decay', expr='1/%sgamma' % mdl.prefix)
     elif model_name == 'logistic':
         mdl = models.StepModel(prefix=model_prefix, form='logistic')
     elif model_name == 'sine':
@@ -167,7 +181,12 @@ class FittingManager:
             par_str_sigma = self.model_prefixes[index] + 'sigma'
             par_str_fwhm = self.model_prefixes[index] + 'fwhm'
             pars[par_str_gamma].expr = ''
-            pars[par_str_gamma].set(value=pars[par_str_gamma].value, vary=True, expr='', min=0, max=np.inf)
+            if par_str_gamma in p0_dict:
+                value = p0_dict[par_str_gamma]
+            else:
+                value = pars[par_str_gamma].value
+
+            pars[par_str_gamma].set(value=value, vary=True, expr='', min=0, max=np.inf)
             # fv = 0.5346*fL + sqrt(0.2166fL^2+fG^2)
             # fG = 2*sigma*sqrt(2*log(2))
             # fl = 2*gamma
@@ -194,7 +213,7 @@ class FittingManager:
         try:
             self.fit_result = self.total_model.fit(self.y_data, self.init_pars, x=self.x_data, weights=self.weights,
                                                    iter_cb=self.iteration_callable)
-            for i in range(self.recursions-1):
+            for i in range(self.recursions - 1):
                 if self.recursion_callable is not None:
                     kwargs = self.recursion_callable(self)
                 else:
@@ -222,6 +241,9 @@ class FittingManager:
             self.fit_result = None
             self.fit_pars = None
             self.x_fit = self.y_fit = None
+
+    def retry_fitting(self):
+        return self._try_fitting()
 
     def get_x_y_fit(self, x_min=None, x_max=None, output_points=1000):
         if x_min is None:
@@ -286,6 +308,21 @@ def linear_sine_fit(x_data, y_data, model_guess_index_regions=None,
     return fitmng
 
 
+def quadratic_sine_fit(x_data, y_data, model_guess_index_regions=None,
+                       input_parameters=DataFrame({'names': [], 'initial_values': [], 'is_fixed': [], 'bounds': []}),
+                       weights=None):
+    model_names = ['quadratic', 'sine']
+    model_prefixes = ['', '']
+
+    models_df = DataFrame({'names': model_names, 'prefixes': model_prefixes})
+    if model_guess_index_regions is not None:
+        models_df['guess_index_regions'] = model_guess_index_regions
+
+    fitmng = FittingManager(x_data, y_data, models_df, input_parameters, weights)
+
+    return fitmng
+
+
 def voigt_linear_fit(x_data, y_data, model_guess_index_regions=None,
                      input_parameters=DataFrame({'names': [], 'initial_values': [], 'is_fixed': [], 'bounds': []}),
                      weights=None):
@@ -333,7 +370,6 @@ def voigt_linear_sine_fit(x_data, y_data, model_guess_index_regions=None,
 def double_voigt_linear_fit(x_data, y_data, model_guess_index_regions=None,
                             input_parameters=DataFrame({'names': [], 'initial_values': [], 'is_fixed': [],
                                                         'bounds': []}), weights=None, peaks_indices=None):
-
     if 'v1_center' not in list(input_parameters['names']) or 'v2_center' not in list(input_parameters['names']):
         if peaks_indices is None:
             peaks_indices, _ = find_peaks(y_data)
@@ -342,7 +378,7 @@ def double_voigt_linear_fit(x_data, y_data, model_guess_index_regions=None,
                             -2:]  # getting 2 peaks with 2 highest y.
             peaks_indices = sorted(peaks_indices)
 
-            deeps, _ = np.array(find_peaks(-y_data))
+            deeps, _ = find_peaks(-y_data)
             deeps = deeps[
                 (deeps > peaks_indices[0]) & (deeps < peaks_indices[1])]  # finding all deeps in between the peaks
             deep = [item for _, item in sorted(zip(y_data[deeps], deeps))][0]  # getting 1 deep with lowest y.
@@ -388,16 +424,73 @@ def double_voigt_linear_fit(x_data, y_data, model_guess_index_regions=None,
     return fitmng, fwhms, centers
 
 
-def get_turton_poison_weight(y_data):
+def exponentialgaussian_linear_fit(x_data, y_data, model_guess_index_regions=None,
+                                   input_parameters=DataFrame(
+                                       {'names': [], 'initial_values': [], 'is_fixed': [], 'bounds': []}),
+                                   recursions=3):
+    model_names = ['exp_gauss', 'linear']
+    model_prefixes = ['', '']
 
+    models_df = DataFrame({'names': model_names, 'prefixes': model_prefixes})
+    if model_guess_index_regions is not None:
+        models_df['guess_index_regions'] = model_guess_index_regions
+
+    fitmng = FittingManager(x_data, y_data, models_df, input_parameters, options='TurtonPoison', recursions=recursions)
+
+    if fitmng.fit_result is not None:
+        sigma = fitmng.fit_result.params['sigma']
+        center = fitmng.fit_result.params['center']
+        decay = fitmng.fit_result.params['decay']
+    else:
+        sigma = None
+        center = None
+        decay = None
+
+    return fitmng, sigma, center, decay
+
+
+def double_exponentialgaussian_linear_fit(x_data, y_data, model_guess_index_regions=None,
+                                          input_parameters=DataFrame(
+                                              {'names': [], 'initial_values': [], 'is_fixed': [], 'bounds': []}),
+                                          recursions=3):
+    model_names = ['exp_gauss', 'exp_gauss', 'linear']
+    model_prefixes = ['eg1_', 'eg2_', '']
+
+    models_df = DataFrame({'names': model_names, 'prefixes': model_prefixes})
+    if model_guess_index_regions is not None:
+        models_df['guess_index_regions'] = model_guess_index_regions
+
+    fitmng = FittingManager(x_data, y_data, models_df, input_parameters, options='TurtonPoison', recursions=recursions)
+    fitmng.init_pars['eg2_sigma'].set(expr='eg1_sigma')
+    fitmng.init_pars['eg2_center'].set(expr='eg1_center')
+    
+    fitmng.init_pars.add('delta', max=0.99, expr='eg1_gamma/eg2_gamma')
+    # fitmng.init_pars['eg2_gamma'].set(expr='eg1_gamma/delta')
+    fitmng.retry_fitting()
+
+    if fitmng.fit_result is not None:
+        sigma = fitmng.fit_result.params['eg1_sigma']
+        center = fitmng.fit_result.params['eg1_center']
+        eg1_decay = fitmng.fit_result.params['eg1_decay']
+        eg2_decay = fitmng.fit_result.params['eg2_decay']
+    else:
+        sigma = None
+        center = None
+        eg1_decay = None
+        eg2_decay = None
+
+    return fitmng, sigma, center, eg1_decay, eg2_decay
+
+
+def get_turton_poison_weight(y_data):
     y_data = np.array(y_data)
     if np.min(y_data) <= 0:  # avoid dividing by zero.
-        weights = 1/(y_data+1)
+        weights = 1 / (y_data + 1)
     else:
-        weights = 1/y_data
+        weights = 1 / y_data
 
     if np.sum(weights) < 0:
-        weights = 1/(y_data+np.abs(np.min(y_data))+1)
+        weights = 1 / (y_data + np.abs(np.min(y_data)) + 1)
 
     return weights
 
@@ -412,9 +505,8 @@ def turton_recursion(fitmng: FittingManager):
 
 def exp_with_bg_fit_turton_poison(x_data, y_data, model_guess_index_regions=None,
                                   input_parameters=pd.DataFrame({'names': [], 'initial_values': [], 'is_fixed': [],
-                                                              'bounds': []}),
+                                                                 'bounds': []}),
                                   recursions=3) -> FittingManager:
-
     pre_fitmng, const, ampl, ampl_sgn = guess_exp_with_bg_parameters(x_data, y_data)
 
     # getting model for actual data
@@ -435,16 +527,82 @@ def exp_with_bg_fit_turton_poison(x_data, y_data, model_guess_index_regions=None
         input_parameters = input_parameters.append({'names': 'c',
                                                     'initial_values': const,
                                                     'is_fixed': False,
-                                                    'bounds': [-10*const, 10*const]},
+                                                    'bounds': [-10 * const, 10 * const]},
                                                    ignore_index=True)
 
-    predicted_ampl_abs = ampl*pre_fitmng.fit_pars['amplitude'].value
+    predicted_ampl_abs = ampl * pre_fitmng.fit_pars['amplitude'].value
 
     if 'amplitude' not in input_parameters['names']:
         input_parameters = input_parameters.append({'names': 'amplitude',
-                                                    'initial_values': ampl*ampl_sgn,
+                                                    'initial_values': ampl * ampl_sgn,
                                                     'is_fixed': False,
-                                                    'bounds': [-10*predicted_ampl_abs, 10*predicted_ampl_abs]},
+                                                    'bounds': [-10 * predicted_ampl_abs, 10 * predicted_ampl_abs]},
+                                                   ignore_index=True)
+
+    fitmng = FittingManager(x_data, y_data, models_df,
+                            input_parameters=input_parameters,
+                            recursions=recursions,
+                            options='TurtonPoison')
+
+    return fitmng
+
+
+def double_exp_with_bg_fit_turton_poison(x_data, y_data, model_guess_index_regions=None,
+                                         input_parameters=pd.DataFrame({'names': [], 'initial_values': [],
+                                                                        'is_fixed': [], 'bounds': []}),
+                                         recursions=3) -> FittingManager:
+    pre_fitmng, const, ampl, ampl_sgn = guess_exp_with_bg_parameters(x_data, y_data)
+    fast_decay_data_length = int(np.ceil(len(x_data) / 10))
+    pre_fitmng_fast, const, ampl_fast, ampl_sgn_fast = guess_exp_with_bg_parameters(x_data[:fast_decay_data_length],
+                                                                                    y_data[:fast_decay_data_length])
+
+    # getting model for actual data
+    models_df = pd.DataFrame({'names': ['constant', 'exp', 'exp'],
+                              'prefixes': ['', '', 'fast_']})
+
+    if model_guess_index_regions is not None:
+        models_df['guess_index_regions'] = model_guess_index_regions
+
+    estimated_decay_rate = pre_fitmng.fit_pars['decay'].value
+    if 'decay' not in input_parameters['names']:
+        input_parameters = input_parameters.append({'names': 'decay',
+                                                    'initial_values': estimated_decay_rate,
+                                                    'is_fixed': False,
+                                                    'bounds': [0, np.max(x_data)]},
+                                                   ignore_index=True)
+
+    estimated_fast_decay_rate = pre_fitmng_fast.fit_pars['decay'].value
+    if 'fast_decay' not in input_parameters['names']:
+        input_parameters = input_parameters.append({'names': 'fast_decay',
+                                                    'initial_values': estimated_fast_decay_rate,
+                                                    'is_fixed': False,
+                                                    'bounds': [0, np.max(x_data[:fast_decay_data_length])]},
+                                                   ignore_index=True)
+
+    if 'c' not in input_parameters['names']:
+        input_parameters = input_parameters.append({'names': 'c',
+                                                    'initial_values': const,
+                                                    'is_fixed': False,
+                                                    'bounds': [-10 * const, 10 * const]},
+                                                   ignore_index=True)
+
+    predicted_ampl_abs = ampl * pre_fitmng.fit_pars['amplitude'].value
+
+    if 'amplitude' not in input_parameters['names']:
+        input_parameters = input_parameters.append({'names': 'amplitude',
+                                                    'initial_values': ampl * ampl_sgn,
+                                                    'is_fixed': False,
+                                                    'bounds': [-10 * predicted_ampl_abs, 10 * predicted_ampl_abs]},
+                                                   ignore_index=True)
+
+    predicted_ampl_abs_fast = ampl_fast * pre_fitmng_fast.fit_pars['amplitude'].value
+
+    if 'fast_amplitude' not in input_parameters['names']:
+        input_parameters = input_parameters.append({'names': 'fast_amplitude',
+                                                    'initial_values': ampl_fast * ampl_sgn_fast,
+                                                    'is_fixed': False,
+                                                    'bounds': [-10 * predicted_ampl_abs_fast,
+                                                               10 * predicted_ampl_abs_fast]},
                                                    ignore_index=True)
 
     fitmng = FittingManager(x_data, y_data, models_df,
@@ -457,7 +615,6 @@ def exp_with_bg_fit_turton_poison(x_data, y_data, model_guess_index_regions=None
 
 def guess_exp_with_bg_parameters(x_data, y_data) -> Tuple[
     FittingManager, Union[np.ndarray, int, float, complex], Union[Union[int, float, complex], Any], int]:
-
     # normalizing the exponential amplitude and removing most of background
     ampl = np.max(y_data) - np.min(y_data)
     is_ampl_positive = np.argmin(y_data) > np.argmax(y_data)
@@ -471,8 +628,9 @@ def guess_exp_with_bg_parameters(x_data, y_data) -> Tuple[
     pre_y_data = ampl_sgn * (y_data - const) / ampl
     pre_models_df = pd.DataFrame({'names': ['exp']})
     pre_input_parameters = pd.DataFrame({'names': ['decay'],
-                                         'initial_values': [np.abs(1/np.polyfit(x_data, np.log(abs(pre_y_data)+1.e-15),
-                                                                                1)[0])],
+                                         'initial_values': [
+                                             np.abs(1 / np.polyfit(x_data, np.log(abs(pre_y_data) + 1.e-15),
+                                                                   1)[0])],
                                          'is_fixed': [False],
                                          'bounds': [[0, np.max(x_data)]]})
     pre_fitmng = FittingManager(x_data, pre_y_data, pre_models_df, input_parameters=pre_input_parameters)

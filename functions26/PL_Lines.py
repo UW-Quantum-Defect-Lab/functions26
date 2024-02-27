@@ -28,6 +28,9 @@ PL_lines = {}
 # Unidentified bound Excitons (I# and Z#): Kumar et al., Journal of Luminescence 176 (2016) [extracted from plot using inkscape] + Meyer et al., pss (b) 241 (2004)
 # Unidentified Excitions bound to structural defects (Y#): Wagner et al., PRB 84 (2011) + Kumar et al., Journal of Luminescence 176 (2016) [extracted from plot using inkscape]
 
+# Yb ions:
+# McLoughlin et al., Physical Review A 83, 013406 (2011) [https://journals.aps.org/pra/abstract/10.1103/PhysRevA.83.013406]
+
 PL_lines['ZnO'] = pd.DataFrame(
     data=[
         ['Free Excitons', 'FX_A_1', r'FX$_\mathrm{A}^\mathrm{n = 1}$', 3.3781, 'low', 'FX<sub>A</sub> (<i>n</i> = 1)'],
@@ -127,12 +130,28 @@ PL_lines['ZnO'] = pd.DataFrame(
     columns=['line_class', 'line_identifier', 'line_identifier_latex', 'x_eV', 'temperature', 'line_identfier_html']
 )
 
+PL_lines['Yb+'] = pd.DataFrame(
+    data=[
+        ['170Yb+', '2S1/2 <-> 2P1/2', r'$^\mathrm{170}$Yb$^\mathrm{+}$ ($^\mathrm{2}$S$_\mathrm{1/2}$ $\leftrightarrow$ $^\mathrm{2}$P$_\mathrm{1/2}$)',
+        369.52364, 'high', '<sup>170</sup>Yb<sup>+</sup> (<sup>2</sup>S<sub>1/2</sub> <-> <sup>2</sup>P<sub>1/2</sub>)'],
+        ['171Yb+', '2S1/2 <-> 2P1/2', r'$^\mathrm{171}$Yb$^\mathrm{+}$ ($^\mathrm{2}$S$_\mathrm{1/2}$ $\leftrightarrow$ $^\mathrm{2}$P$_\mathrm{1/2}$)',
+        369.52604, 'high', '<sup>171</sup>Yb<sup>+</sup> (<sup>2</sup>S<sub>1/2</sub> <-> <sup>2</sup>P<sub>1/2</sub>)'],
+        ['172Yb+', '2S1/2 <-> 2P1/2', r'$^\mathrm{172}$Yb$^\mathrm{+}$ ($^\mathrm{2}$S$_\mathrm{1/2}$ $\leftrightarrow$ $^\mathrm{2}$P$_\mathrm{1/2}$)',
+        369.52435, 'high', '<sup>172</sup>Yb<sup>+</sup> (<sup>2</sup>S<sub>1/2</sub> <-> <sup>2</sup>P<sub>1/2</sub>)'],
+        ['174Yb+', '2S1/2 <-> 2P1/2', r'$^\mathrm{174}$Yb$^\mathrm{+}$ ($^\mathrm{2}$S$_\mathrm{1/2}$ $\leftrightarrow$ $^\mathrm{2}$P$_\mathrm{1/2}$)',
+        369.52494, 'high', '<sup>174</sup>Yb<sup>+</sup> (<sup>2</sup>S<sub>1/2</sub> <-> <sup>2</sup>P<sub>1/2</sub>)'],
+        ['176Yb+', '2S1/2 <-> 2P1/2', r'$^\mathrm{176}$Yb$^\mathrm{+}$ ($^\mathrm{2}$S$_\mathrm{1/2}$ $\leftrightarrow$ $^\mathrm{2}$P$_\mathrm{1/2}$)',
+        369.52550, 'high', '<sup>176</sup>Yb<sup>+</sup> (<sup>2</sup>S<sub>1/2</sub> <-> <sup>2</sup>P<sub>1/2</sub>)'],
+    ],
+    columns=['line_class', 'line_identifier', 'line_identifier_latex', 'x_nm', 'temperature', 'line_identfier_html']
+)
+
 
 class PL_Lines:
-    def __init__(self, material='ZnO', temperature='low', correct_for_nair=False):
+    def __init__(self, material='ZnO', temperature='low', refractive_index=n_air):
         self.material = material
         self.temperature = temperature
-        self.correct_for_nair = correct_for_nair
+        self.refractive_index = refractive_index
 
         self._import_database()
 
@@ -140,9 +159,9 @@ class PL_Lines:
         self.database = PL_lines[self.material]
         self.database = self.database[self.database['temperature'] == self.temperature]
         self.database.reset_index(drop=True, inplace=True)
-        self.database['x_nm'] = conversion_factor_nm_to_ev / self.database['x_eV']
-
-        if self.correct_for_nair:
+        if 'x_nm' in self.database:
             self.database['x_eV'] = conversion_factor_nm_to_ev / (self.database['x_nm'] * n_air)
+        elif 'x_eV' in self.database:
+            self.database['x_nm'] = (conversion_factor_nm_to_ev / self.database['x_eV'])/n_air
 
         return True

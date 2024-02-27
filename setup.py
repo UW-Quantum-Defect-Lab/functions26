@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="functions26",
-    version="0.1.4.1",
+    version="0.1.5.0",
     author="Vasilis Niaouris",
     author_email="vasilisniaouris@gmail.com",
     description="Supporting functions for Fu lab 26 room",
@@ -38,5 +38,5 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.8',
+    python_requires='>=3.9',
 )

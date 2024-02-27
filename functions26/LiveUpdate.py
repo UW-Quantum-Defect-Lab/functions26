@@ -177,7 +177,7 @@ class LiveUpdateFunctions(BasicGUIFunctions):
     def __init__(self, plot_labels=None, no_of_datasets=1, maximum_x_axis_points=0, run_on_call=False,
                  gui_refresh_rate=UnitClass(20, 'Hz'), device_acquisition_rate=UnitClass(50, 'Hz'),
                  form_dataset_process_method='averaging', plot_normalization_method='none',
-                 current_reading_form='{:.3f}', current_reading_units='', datatype=None, window_name='Live Update'):
+                 current_reading_form='{:,.3f}', current_reading_units='', datatype=None, window_name='Live Update'):
 
         if plot_labels is None:
             plot_labels = {'bottom': 'Time (seconds)', 'left': 'Reading'}

@@ -5,12 +5,15 @@
 
 
 import csv
+from typing import Union, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
 import scipy.optimize as spo
 import scipy.io as spio
 import warnings
 
+from matplotlib import pyplot as plt
 from sif_reader import np_open as readsif
 from .constants import conversion_factor_nm_to_ev  # eV*nm
 from .constants import n_air
@@ -19,7 +22,8 @@ from .DataDictXXX import DataDictFilenameInfo
 from .DataFrame26 import DataFrame26
 from .Dict26 import Dict26
 from .useful_functions import get_added_label_from_unit
-from .FittingManager import exp_with_bg_fit_turton_poison
+from .FittingManager import exp_with_bg_fit_turton_poison, double_exp_with_bg_fit_turton_poison, voigt_linear_fit, \
+    FittingManager
 from .units import unit_families
 
 
@@ -250,7 +254,7 @@ class DataSpectrum(DataXXX):
         try:
             self.infoSpectrum['background_counts_per_second_per_power'] = self.infoSpectrum['background_counts'
                                                                                             '_per_second'] / power
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, ZeroDivisionError):
             warnings.warn('No power information found in file_info. Y data per power were not calculated.')
 
         return True
@@ -310,6 +314,76 @@ class DataSpectrum(DataXXX):
 
         return True
 
+    def get_wavelength_offset(self, fit_output_points: Union[None, int] = None,
+                              want_plot: bool = False, fig: plt.Figure = None, ax: plt.Axes = None,
+                              data_plot_options: Dict = None, fit_plot_options: Dict = None) \
+            -> Tuple[float, List[float], List[float], FittingManager]:
+        """
+        This function is used to find the offset between the spectrometer wavelength and the input wavelength of a
+        directly reflected beam. It purposefully does not return only the offset, so that the user will always be
+        reminded to check the fit and not wholeheartedly trust this highly automated fitting method.
+
+        Parameters
+        ----------
+        fit_output_points: int
+            An integer indicating the length of the x_fit and y_fit plotted and returned lists.
+        want_plot: bool
+            If True, plots the data and the attempted fit
+        fig: plt.Figures
+            If an ax is not given, use the figure to get its current axes to plot the data and the fit.
+            Defaults to None. If None, plots on the current (or new) figure of matplotlib.pyplot.
+        ax: plt.Axes
+            Axes to plot in. Has the highest priority. Defaults to None.
+        data_plot_options: Dict
+            A dictionary of all the desired plotting options for the data as used in matplotlib.pyplot.plot function.
+            Defaults to None.
+        fit_plot_options: Dict
+            A dictionary of all the desired plotting options for the data as used in matplotlib.pyplot.plot function.
+            Defaults to None.
+
+        Returns
+        -------
+        float, List[float], List[float], FittingManager
+            Returns offset, x_fit_data, y_fit_data, fitting_manager: FittingManager. The offset (strictly in first order
+            and nanometers) can be readily plugged in another DataSIF function. The fitted data-points are given in case
+            the use wants them for an arbitrary application. The FittingManager is given if more information about the
+            fit are needed. Even though the fitting manager contains the fitted data hence making the return of
+            x_fit_data, and y_fit_data redundant, I think it will be easier for the user to have direct access to them.
+        """
+
+        if data_plot_options is None:
+            data_plot_options = {}
+        if fit_plot_options is None:
+            fit_plot_options = {}
+
+        x_data = self.data['x_nm']
+        if self.second_order:
+            x_data *= 2
+        y_data = self.data['y_nobg_counts_per_second']
+
+        real_wavelength = self.file_info['Lsr: Wavelength (nm)']
+        fitmng, _, fit_center = voigt_linear_fit(x_data, y_data)
+
+        if fit_output_points is None:
+            fit_output_points = len(y_data) * 10
+        fitmng.get_x_y_fit(x_min=None, x_max=None, output_points=fit_output_points)
+
+        offset = real_wavelength - fit_center
+
+        if want_plot:
+            if ax is not None:
+                ax.plot(x_data, y_data, **data_plot_options)
+                ax.plot(fitmng.x_fit, fitmng.y_fit, **fit_plot_options)
+            elif fig is not None:
+                ax = fig.gca()
+                ax.plot(x_data, y_data, **data_plot_options)
+                ax.plot(fitmng.x_fit, fitmng.y_fit, **fit_plot_options)
+            else:
+                plt.plot(x_data, y_data, **data_plot_options)
+                plt.plot(fitmng.x_fit, fitmng.y_fit, **fit_plot_options)
+
+        return offset, fitmng.x_fit, fitmng.y_fit, fitmng
+
 
 class DataSIF(DataSpectrum):
     allowed_file_extensions = ['sif', 'qdlf']
@@ -354,7 +428,8 @@ class DataOP(DataXXX):
     spacer = '_'
     qdlf_datatype = 'op'
 
-    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True, run_turton_poison_fit_functions=True):
+    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=False, run_turton_poison_fit_functions=True,
+                 turton_poison_fit_decay_option='single', fit_start_end_indices=(None, None)):
 
         self.infoOP = DataDictOP()
         self.size = -1
@@ -363,6 +438,8 @@ class DataOP(DataXXX):
         self.time_step = None
         self.run_simple_fit_functions = run_simple_fit_functions
         self.run_turton_poison_fit_functions = run_turton_poison_fit_functions
+        self.turton_poison_fit_decay_option = turton_poison_fit_decay_option
+        self.fit_start_end_indices = fit_start_end_indices
 
         super().__init__(file_name, folder_name,
                          self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
@@ -443,7 +520,8 @@ class DataOP(DataXXX):
         return {'infoOP': dict(self.infoOP), 'size': self.size, 'simple_fit': self.simple_fit,
                 'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions,
                 'turton_poison_fit': self.turton_poison_fit,
-                'run_turton_poison_fit_functions': self.run_turton_poison_fit_functions}
+                'run_turton_poison_fit_functions': self.run_turton_poison_fit_functions,
+                'turton_poison_fit_decay_option': self.turton_poison_fit_decay_option}
 
     def set_additional_info(self, info_dictionary):
         self.infoOP = DataDictOP(**info_dictionary['infoOP'])
@@ -453,6 +531,7 @@ class DataOP(DataXXX):
         self.run_simple_fit_functions = info_dictionary['run_simple_fit_functions']
         self.turton_poison_fit = info_dictionary['turton_poison_fit']
         self.run_turton_poison_fit_functions = info_dictionary['run_turton_poison_fit_functions']
+        self.turton_poison_fit_decay_option = info_dictionary['turton_poison_fit_decay_option']
 
     def y_data_in_counts_per_cycle(self):
         rescaling_factor_cycle = (self.infoOP['numRun'] * self.infoOP['numPerRun'])  # per cycle
@@ -488,8 +567,11 @@ class DataOP(DataXXX):
                                        & (self.data['x_{0}'.format(unit_x)] <= end)]
         return data_in_region['y_{0}'.format(unit_y)].mean()
 
-    def get_index_range_in_time_region(self, start, end, unit_x='time_us'):
-        return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] < end)
+    def get_index_range_in_time_region(self, start, end, unit_x='time_us', include_end_point=False):
+        if include_end_point:
+            return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] <= end)
+        else:
+            return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] < end)
 
     def get_single_index_in_time(self, value, unit_x='time_us'):
         return (self.data['x_{0}'.format(unit_x)] >= value - self.time_step / 2) & (self.data['x_{0}'.format(unit_x)] <=
@@ -534,8 +616,10 @@ class DataOP(DataXXX):
             b = np.mean(b_estimations)
             return [bg, amp, b, x0]
 
-        start = self.infoOP['pumpOnTime_us']
-        end = 2 * self.infoOP['pumpOnTime_us']
+        start = self.infoOP['pumpOnTime_us'] if self.fit_start_end_indices[0] is None \
+            else self.fit_start_end_indices[0]
+        end = 2 * self.infoOP['pumpOnTime_us'] if self.fit_start_end_indices[1] is None \
+            else self.fit_start_end_indices[1]
         x = self.data['x_time_us'][self.get_index_range_in_time_region(start, end)]
         y = self.data[units_y][self.get_index_range_in_time_region(start, end)]
 
@@ -577,8 +661,10 @@ class DataOP(DataXXX):
     def get_turton_poison_fit(self, units_y='counts'):
         units_y = 'y_{0}'.format(units_y)
 
-        start = self.infoOP['pumpOnTime_us']
-        end = 2 * self.infoOP['pumpOnTime_us']
+        start = self.infoOP['pumpOnTime_us'] if self.fit_start_end_indices[0] is None \
+            else self.fit_start_end_indices[0]
+        end = 2 * self.infoOP['pumpOnTime_us'] if self.fit_start_end_indices[1] is None \
+            else self.fit_start_end_indices[1]
         x = np.array(self.data['x_time_us'][self.get_index_range_in_time_region(start, end)])
         y = np.array(self.data[units_y][self.get_index_range_in_time_region(start, end)])
 
@@ -588,13 +674,30 @@ class DataOP(DataXXX):
 
         x0 = float(list(x)[0])
 
-        fitmng = exp_with_bg_fit_turton_poison(x-x0, y)
+        if self.turton_poison_fit_decay_option == 'single':
+            fitmng = exp_with_bg_fit_turton_poison(x - x0, y)
+        elif self.turton_poison_fit_decay_option == 'double':
+            fitmng = double_exp_with_bg_fit_turton_poison(x - x0, y)
 
         if self.turton_poison_fit is None:
             self.turton_poison_fit = dict()
         self.turton_poison_fit[units_y] = fitmng
 
         return fitmng
+
+    def get_binned_data(self, step: int = 2):
+        df = self.data
+        new_df = DataFrame26(df.default_keys, df.allowed_units, df.spacer)
+
+        for key in df.keys():
+            data_list = np.array(df[key])
+            if 'time' not in key:
+                new_data_list = [sum(data_list[i:i + step]) for i in range(0, len(data_list), step)]
+            else:
+                new_data_list = [data_list[i] for i in range(0, len(data_list), step)]
+            new_df[key] = new_data_list
+
+        return new_df
 
 
 class DataOP2LaserDelay(DataXXX):
@@ -604,7 +707,8 @@ class DataOP2LaserDelay(DataXXX):
     spacer = '_'
     qdlf_datatype = 'op'
 
-    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=True, run_turton_poison_fit_functions=True):
+    def __init__(self, file_name, folder_name='.', run_simple_fit_functions=False, run_turton_poison_fit_functions=True,
+                 turton_poison_fit_decay_option='single', fit_start_end_indices=(None, None)):
 
         self.infoOP2LaserDelay = DataDictOP2LaserDelay()
         self.size = -1
@@ -613,6 +717,8 @@ class DataOP2LaserDelay(DataXXX):
         self.time_step = None
         self.run_simple_fit_functions = run_simple_fit_functions
         self.run_turton_poison_fit_functions = run_turton_poison_fit_functions
+        self.turton_poison_fit_decay_option = turton_poison_fit_decay_option
+        self.fit_start_end_indices = fit_start_end_indices
 
         super().__init__(file_name, folder_name,
                          self.default_keys, self.allowed_units, self.allowed_file_extensions, self.spacer,
@@ -693,7 +799,8 @@ class DataOP2LaserDelay(DataXXX):
         return {'infoOP2LaserDelay': dict(self.infoOP2LaserDelay), 'size': self.size, 'simple_fit': self.simple_fit,
                 'time_step': self.time_step, 'run_simple_fit_functions': self.run_simple_fit_functions,
                 'turton_poison_fit': self.turton_poison_fit,
-                'run_turton_poison_fit_functions': self.run_turton_poison_fit_functions}
+                'run_turton_poison_fit_functions': self.run_turton_poison_fit_functions,
+                'turton_poison_fit_decay_option': self.turton_poison_fit_decay_option}
 
     def set_additional_info(self, info_dictionary):
         self.infoOP = DataDictOP2LaserDelay(**info_dictionary['infoOP2LaserDelay'])
@@ -703,6 +810,7 @@ class DataOP2LaserDelay(DataXXX):
         self.run_simple_fit_functions = info_dictionary['run_simple_fit_functions']
         self.turton_poison_fit = info_dictionary['turton_poison_fit']
         self.run_turton_poison_fit_functions = info_dictionary['run_turton_poison_fit_functions']
+        self.turton_poison_fit_decay_option = info_dictionary['turton_poison_fit_decay_option']
 
     def y_data_in_counts_per_cycle(self):
         rescaling_factor_cycle = (self.infoOP2LaserDelay['numRun'] * self.infoOP2LaserDelay['numPerRun'])  # per cycle
@@ -769,8 +877,11 @@ class DataOP2LaserDelay(DataXXX):
                                        & (self.data['x_{0}'.format(unit_x)] <= end)]
         return data_in_region['y_{0}'.format(unit_y)].mean()
 
-    def get_index_range_in_time_region(self, start, end, unit_x='time_us'):
-        return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] < end)
+    def get_index_range_in_time_region(self, start, end, unit_x='time_us', include_end_point=False):
+        if include_end_point:
+            return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] <= end)
+        else:
+            return (self.data['x_{0}'.format(unit_x)] >= start) & (self.data['x_{0}'.format(unit_x)] < end)
 
     def get_single_index_in_time(self, value, unit_x='time_us'):
         return (self.data['x_{0}'.format(unit_x)] >= value - self.time_step / 2) & (self.data['x_{0}'.format(unit_x)] <=
@@ -812,9 +923,13 @@ class DataOP2LaserDelay(DataXXX):
 
         if units_y.startswith('y_control'):
             start, end = self.get_control_start_end_indices()
+            start = start if self.fit_start_end_indices[0] is None else self.fit_start_end_indices[0]
+            end = end if self.fit_start_end_indices[1] is None else self.fit_start_end_indices[1]
             x = np.array(self.data['x_control_time_us'][start:end])
         elif units_y.startswith('y_signal'):
             start, end = self.get_signal_start_end_indices()
+            start = start if self.fit_start_end_indices[0] is None else self.fit_start_end_indices[0]
+            end = end if self.fit_start_end_indices[1] is None else self.fit_start_end_indices[1]
             x = np.array(self.data['x_signal_time_us'][start:end])
         else:
             return None
@@ -860,9 +975,13 @@ class DataOP2LaserDelay(DataXXX):
 
         if units_y.startswith('y_control'):
             start, end = self.get_control_start_end_indices()
+            start = start if self.fit_start_end_indices[0] is None else self.fit_start_end_indices[0]
+            end = end if self.fit_start_end_indices[1] is None else self.fit_start_end_indices[1]
             x = np.array(self.data['x_control_time_us'][start:end])
         elif units_y.startswith('y_signal'):
             start, end = self.get_signal_start_end_indices()
+            start = start if self.fit_start_end_indices[0] is None else self.fit_start_end_indices[0]
+            end = end if self.fit_start_end_indices[1] is None else self.fit_start_end_indices[1]
             x = np.array(self.data['x_signal_time_us'][start:end])
         else:
             return None
@@ -874,13 +993,30 @@ class DataOP2LaserDelay(DataXXX):
 
         x0 = float(list(x)[0])
 
-        fitmng = exp_with_bg_fit_turton_poison(x-x0, y)
+        if self.turton_poison_fit_decay_option == 'single':
+            fitmng = exp_with_bg_fit_turton_poison(x - x0, y)
+        elif self.turton_poison_fit_decay_option == 'double':
+            fitmng = double_exp_with_bg_fit_turton_poison(x - x0, y)
 
         if self.turton_poison_fit is None:
             self.turton_poison_fit = dict()
         self.turton_poison_fit[units_y] = fitmng
 
         return fitmng
+
+    def get_binned_data(self, step: int = 2):
+        df = self.data
+        new_df = DataFrame26(df.default_keys, df.allowed_units, df.spacer)
+
+        for key in df.keys():
+            data_list = np.array(df[key])
+            if 'time' not in key:
+                new_data_list = [sum(data_list[i:i + step]) for i in range(0, len(data_list), step)]
+            else:
+                new_data_list = [data_list[i] for i in range(0, len(data_list), step)]
+            new_df[key] = new_data_list
+
+        return new_df
 
 
 class DataT1(DataXXX):
@@ -1141,7 +1277,7 @@ class DataSPCM(DataQDLF):
     def get_data(self):
         # gets data from raw files
         if self.data_manager is None:
-            from .filing.QDLFInterface import QDLFDataManager
+            from .filing.QDLFiling import QDLFDataManager
             self.data_manager = QDLFDataManager.load(self.folder_name + '/' + self.file_name)
 
         file = self.data_manager
@@ -1160,19 +1296,34 @@ class DataPower(DataQDLF):
 
     qdlf_datatype = 'power'
 
-    def __init__(self, file_name, folder_name='./', data_manager=None):
+    def __init__(self, file_name, folder_name='./', data_manager=None, force_power_ratio=False):
+        self.force_power_ratio = force_power_ratio
         super().__init__(file_name, self.default_keys, self.allowed_units, self.spacer, self.qdlf_datatype, folder_name,
                          data_manager)
 
     def get_data(self):
         # gets data from raw files
         if self.data_manager is None:
-            from .filing.QDLFInterface import QDLFDataManager
+            from .filing.QDLFiling import QDLFDataManager
             self.data_manager = QDLFDataManager.load(self.folder_name + '/' + self.file_name)
 
         file = self.data_manager
         self.data['x_second'] = file.data['x1']
         self.data['y_uW'] = file.data['y1']
+
+        if 'x2' in file.data.keys():
+            self.data['x2_second'] = file.data['x2']
+            self.data['y2_uW'] = file.data['y2']
+            if self.force_power_ratio:
+                y1 = np.array(file.data['y1'])
+                y2 = np.array(file.data['y2'])
+                for i in range(len(y1)):
+                    if y1[i] > y2[i]:
+                        temp = y1[i]
+                        y1[i] = y2[i]
+                        y2[i] = temp
+                self.data['y_uW'] = y1
+                self.data['y2_uW'] = y2
 
         return True
 
@@ -1191,7 +1342,7 @@ class DataWavelength(DataQDLF):
     def get_data(self):
         # gets data from raw files
         if self.data_manager is None:
-            from .filing.QDLFInterface import QDLFDataManager
+            from .filing.QDLFiling import QDLFDataManager
             self.data_manager = QDLFDataManager.load(self.folder_name + '/' + self.file_name)
 
         file = self.data_manager

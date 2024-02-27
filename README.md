@@ -6,7 +6,7 @@ _________________________________
 To simply install:
     (open cmd with administrator privileges)
     (cd to the directory setup.py resides (might need to change the disk from C:\ to e.g. D:\ by typing d: ))
-    pip install dist/functions26-0.1.4.1.tar.gz
+    pip install dist/functions26-0.1.5.0.tar.gz
 
 An additional dependency might need to be installed with the commands:
     pip install ./downloaded_dependencies/sif_reader-master.zip
@@ -18,8 +18,8 @@ When you make changes here, make sure to run the following commands to update th
     (open cmd with administrator privileges)
     (cd to the directory setup.py resides (might need to change the disk from C:\ to e.g. D:\ by typing d: ))
     python -m setup.py sdist bdist_wheel
-    python -m pip install dist/functions26-0.1.4.1.tar.gz
-    python -m setup.py sdist bdist_wheel & python -m pip install dist/functions26-0.1.4.1.tar.gz 
+    python -m pip install dist/functions26-0.1.5.0.tar.gz
+    python -m setup.py sdist bdist_wheel & python -m pip install dist/functions26-0.1.5.0.tar.gz 
 _________________________________
 
 The files to modify are in the functions26

@@ -14,9 +14,8 @@ from .DataDictXXX import DataDictSIF
 from .Plot2D import two_dimensional_plot
 
 
-
-
 class Data2D:
+
     def __init__(self, file_name, folder_name, allowed_file_extensions):
         self.file_name = file_name
         if file_name == '':
@@ -59,9 +58,9 @@ class Data2D:
 class DataMagnetoPL(Data2D):
     allowed_file_extensions = ['mat']
 
-    def __init__(self, file_name, folder_name='.', background = 0, wavelength_offset = 0,
-                        x_axis_identifier = 'eV',
-                        refractive_index = n_air, second_order = True):
+    def __init__(self, file_name, folder_name='.', background=0, wavelength_offset=0,
+                 x_axis_identifier='eV',
+                 refractive_index=n_air, second_order=True):
         self.background = background
         self.wavelength_offset = wavelength_offset
         self.refractive_index = refractive_index
@@ -76,9 +75,9 @@ class DataMagnetoPL(Data2D):
 
         self.wavelength = matlab_file_data['pled'][0][0][0][0] + self.wavelength_offset
         if self.second_order:
-            self.photon_energy = conversion_factor_nm_to_ev/(self.wavelength/2*self.refractive_index)
+            self.photon_energy = conversion_factor_nm_to_ev / (self.wavelength / 2 * self.refractive_index)
         else:
-            self.photon_energy = conversion_factor_nm_to_ev/(self.wavelength*self.refractive_index)
+            self.photon_energy = conversion_factor_nm_to_ev / (self.wavelength * self.refractive_index)
         if self.x_axis_identifier == 'nm':
             self.x_axis = self.wavelength
         elif self.x_axis_identifier == 'eV':
@@ -90,8 +89,12 @@ class DataMagnetoPL(Data2D):
         self.data = matlab_file_data['pled'][0][0][29] - self.background
         self.data_normalized = []
         for spectrum in self.data:
-            self.data_normalized.append(spectrum/np.nanmax(spectrum))
+            self.data_normalized.append(spectrum / np.nanmax(spectrum))
         self.data_normalized = np.array(self.data_normalized)
+        # Add normalization for the entire spectra
+        self.normalized_to_all = []
+        for spectrum in self.data:
+            self.normalized_to_all.append(spectrum / np.nanmax(self.data))
 
         return True
 
@@ -102,9 +105,11 @@ class DataMagnetoPL(Data2D):
                     shading='auto',
                     plot_style=None,
                     plot_normalized_spectra=False,
+                    plot_all_normalized_spectra=False,
                     x_axis_label=None,
                     y_axis_label=None,
                     color_bar_label=None,
+                    color_bar_ticklabels='Auto',
                     fig=None,
                     ax=None):
         if x_axis_label is None:
@@ -122,6 +127,8 @@ class DataMagnetoPL(Data2D):
 
         if plot_normalized_spectra:
             data = self.data_normalized
+        elif plot_all_normalized_spectra:
+            data = self.data_normalized_to_all
         else:
             data = self.data
 
@@ -132,6 +139,7 @@ class DataMagnetoPL(Data2D):
                                             scale=scale,
                                             color_bar=color_bar,
                                             color_bar_label=color_bar_label,
+                                            color_bar_ticklabels=color_bar_ticklabels,
                                             shading=shading,
                                             plot_style=plot_style,
                                             fig=fig,
@@ -143,7 +151,8 @@ class DataMagnetoPL(Data2D):
 class DataSIFKineticSeries(Data2D):
     allowed_file_extensions = ['sif']
 
-    def __init__(self, file_name, folder_name='.', second_order = False, wavelength_offset = 0, background_per_cycle = 300, refractive_index = n_air):
+    def __init__(self, file_name, folder_name='.', second_order=False, wavelength_offset=0, background_per_cycle=300,
+                 refractive_index=n_air):
         self.second_order = second_order
         self.refractive_index = refractive_index
 
@@ -175,22 +184,29 @@ class DataSIFKineticSeries(Data2D):
         for n in range(len(counts_info)):
             self.data.append(list(counts_info[n][0]))
         self.data = np.array(self.data)
-        self.data = np.flip(self.data, axis = 1)
+        self.data = np.flip(self.data, axis=1)
 
         self.data_normalized = []
         for spectrum in self.data:
-            self.data_normalized.append(spectrum/np.nanmax(spectrum))
+            self.data_normalized.append(spectrum / np.nanmax(spectrum))
         self.data_normalized = np.array(self.data_normalized)
+        # Get the data normalized to all spectra
+        self.data_normalized_to_all = []
+        self.all_data_max = np.max(self.data)
+        for spectrum in self.data:
+            self.data_normalized_to_all.append(spectrum / self.all_data_max)
+        self.data_normalized_to_all = np.array(self.data_normalized_to_all)
+            
 
         self.x_axis = {}
-        x_pixel = np.array([pixel for pixel in range(1, len(self.data[0])+1, 1)])
+        x_pixel = np.array([pixel for pixel in range(1, len(self.data[0]) + 1, 1)])
         self.x_axis['x_pixel'] = x_pixel[::-1]
 
         self.infoSIF['cal_data'] = acquisition_info['Calibration_data']
         self.infoSIF['exposure_time_secs'] = acquisition_info['ExposureTime']
         self.infoSIF['cycles'] = acquisition_info['AccumulatedCycles']
 
-        self.y_axis = np.array([n*acquisition_info['CycleTime'] for n in range(len(self.data))])
+        self.y_axis = np.array([n * acquisition_info['CycleTime'] for n in range(len(self.data))])
 
         return True
 
@@ -206,15 +222,16 @@ class DataSIFKineticSeries(Data2D):
         return True
 
     def set_x_data_in_nm_2nd_order(self):
-        self.x_axis['x_nm'] = self.get_wavelength_calibration()/2.
+        self.x_axis['x_nm'] = self.get_wavelength_calibration() / 2.
         return True
 
     def set_x_data_in_ev(self):
-        self.x_axis['x_eV'] = conversion_factor_nm_to_ev/(self.get_wavelength_calibration()*self.refractive_index)
+        self.x_axis['x_eV'] = conversion_factor_nm_to_ev / (self.get_wavelength_calibration() * self.refractive_index)
         return True
 
     def set_x_data_in_ev_2nd_order(self):
-        self.x_axis['x_eV'] = conversion_factor_nm_to_ev/(self.get_wavelength_calibration()*self.refractive_index/2.)
+        self.x_axis['x_eV'] = conversion_factor_nm_to_ev / (
+                self.get_wavelength_calibration() * self.refractive_index / 2.)
         return True
 
     def set_all_x_data(self):
@@ -232,38 +249,50 @@ class DataSIFKineticSeries(Data2D):
         return True
 
     def set_y_data_nobg_counts_per_second(self):
-        self.data = self.data/self.infoSIF['exposure_time_secs']/self.infoSIF['cycles']
+        self.data = self.data / self.infoSIF['exposure_time_secs'] / self.infoSIF['cycles']
         self.data = self.data - self.infoSIF['background_counts_per_second']
 
         return True
 
     def add_heatmap(self,
-                    axes_limits = 'Auto',
-                    scale = 'Auto',
-                    color_bar = True,
-                    shading = 'auto',
-                    plot_style = None,
-                    plot_normalized_spectra = False):
-        x_axis_label = 'Photon Energy (eV)'
-        y_axis_label = 'Time (s)'
-        if plot_normalized_spectra:
+                    axes_limits='Auto',
+                    scale='Auto',
+                    color_bar=True,
+                    shading='auto',
+                    plot_style=None,
+                    plot_normalized_spectra=False,
+                    plot_all_normalized_spectra=False,
+                    x_axis_label='Photon Energy (eV)',
+                    y_axis_label='Time (s)',
+                    color_bar_label='',
+                    color_bar_ticklabels='Auto',
+                    fig=None,
+                    ax=None):
+        if plot_normalized_spectra and color_bar_label == '':
+            color_bar_label = 'Normalized PL-Intensity (rel. units)'
+        elif plot_all_normalized_spectra and color_bar_label == '':
             color_bar_label = 'Normalized PL-Intensity (rel. units)'
         else:
             color_bar_label = 'PL-Intensity (counts/second)'
 
         if plot_normalized_spectra:
             data = self.data_normalized
+        elif plot_all_normalized_spectra:
+            data = self.data_normalized_to_all
         else:
             data = self.data
 
         self.heatmap = two_dimensional_plot(data, self.x_axis['x_eV'], self.y_axis,
-                                            x_axis_label = x_axis_label,
-                                            y_axis_label = y_axis_label,
-                                            axes_limits = axes_limits,
-                                            scale = scale,
-                                            color_bar = color_bar,
-                                            color_bar_label = color_bar_label,
-                                            shading = shading,
-                                            plot_style = plot_style)
+                                            x_axis_label=x_axis_label,
+                                            y_axis_label=y_axis_label,
+                                            axes_limits=axes_limits,
+                                            scale=scale,
+                                            color_bar=color_bar,
+                                            color_bar_label=color_bar_label,
+                                            color_bar_ticklabels=color_bar_ticklabels,
+                                            shading=shading,
+                                            plot_style=plot_style,
+                                            fig=fig,
+                                            ax=ax)
 
         return True

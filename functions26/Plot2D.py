@@ -16,6 +16,7 @@ class two_dimensional_plot:
                  axes_limits='Auto',
                  scale='Auto',
                  color_bar=True, color_bar_label='',
+                 color_bar_ticklabels='Auto',
                  shading='auto',
                  plot_style=None,
                  fig=None,
@@ -25,6 +26,7 @@ class two_dimensional_plot:
         self.scale = scale
         self.color_bar = color_bar
         self.color_bar_label = color_bar_label
+        self.color_bar_ticklabels = color_bar_ticklabels
         self.plot_style = plot_style
         self.shading = shading
 
@@ -69,8 +71,7 @@ class two_dimensional_plot:
             im = axes.pcolormesh(self.x_axis, self.y_axis, self.data,
                                  cmap=plt.get_cmap('gray'),
                                  shading=self.shading,
-                                 rasterized=True
-                                )
+                                 rasterized=True)
 
         else:
             default_scale = {'minimum_value': np.nanmin(self.data), 'maximum_value': np.nanmax(self.data), 'norm': None,
@@ -84,15 +85,13 @@ class two_dimensional_plot:
                                      cmap=self.scale['color_map'],
                                      vmin=self.scale['minimum_value'], vmax=self.scale['maximum_value'],
                                      shading=self.shading,
-                                     rasterized=True
-                                    )
+                                     rasterized=True)
             elif self.scale['norm'] == 'log':
                 im = axes.pcolormesh(self.x_axis, self.y_axis, self.data,
                                      cmap=self.scale['color_map'],
                                      norm=LogNorm(vmin=self.scale['minimum_value'], vmax=self.scale['maximum_value']),
                                      shading=self.shading,
-                                     rasterized=True
-                                    )
+                                     rasterized=True)
 
         cax = None
         if self.color_bar:
@@ -100,6 +99,8 @@ class two_dimensional_plot:
             cax = divider.append_axes('right', size='5%', pad=0.05)
             cbar = figure.colorbar(im, cax=cax, orientation='vertical')
             cax.set_ylabel(self.color_bar_label)
+            if self.color_bar_ticklabels != 'Auto':
+                cax.set_yticklabels(self.color_bar_ticklabels)
 
         # Set axes limits
         axes.set_xlim(self.axes_limits['x'])
@@ -111,6 +112,11 @@ class two_dimensional_plot:
 
         # Add figure and axes for to self further manipulation
         self.plot = {'figure': figure, 'axes': axes, 'colorbar_axes': cax}
+
+        return True
+
+    def add_curve(self, x_data, y_data, color):
+        self.plot['axes'].plot(x_data, y_data, color=color)
 
         return True
 

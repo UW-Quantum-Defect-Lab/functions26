@@ -16,7 +16,9 @@ class SPCM:
     spcm_name = 'dev1/ctr1'
     internal_rate = UnitClass(20000000, 'Hz')  # Hz
 
-    def __init__(self):
+    def __init__(self, instrument_port=None):
+        if instrument_port is not None:
+            self.spcm_name = instrument_port
         self.spcm = NIdaqInstrument(self.spcm_name)
         self.reader = None
         self.reading_spcm_task_callback = None
@@ -103,3 +105,6 @@ class SPCM:
             return True
         except Exception:
             return False
+
+    def shutdown(self):
+        self.stop_acquisition()
